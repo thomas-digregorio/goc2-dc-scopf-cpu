@@ -14,7 +14,7 @@ from .model import build_extensive_model, estimate_extensive_size
 from .paths import configure_local_runtime, load_json, repo_root, require_local_path, resolve_from
 from .source import audit_case, read_case
 
-DEFAULT_CONFIG = "configs/GOC2-DC-D1-CORRECTIVE-v2-617.json"
+DEFAULT_CONFIG = "configs/GOC2-DC-D1-CORRECTIVE-v2-617-simplex-fresh-pricing.json"
 
 
 def _arguments() -> argparse.Namespace:

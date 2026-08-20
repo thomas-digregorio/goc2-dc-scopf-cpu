@@ -46,9 +46,17 @@ def test_tiny_primary_milp_and_pricing(tiny_case, tiny_config) -> None:
     assert retained_pricing["base_balance_duals"].tolist() == pytest.approx(
         pricing.base_balance_duals.tolist()
     )
-    assert pricing.hot_start.resident_model_reused
-    assert pricing.hot_start.selected_method in {"resident_basis", "complete_primary_primal"}
-    assert pricing.hot_start.basis_accepted or pricing.hot_start.primal_start_accepted
+    assert primary.resident_highs is None
+    assert not pricing.hot_start.required
+    assert not pricing.hot_start.resident_model_reused
+    assert pricing.hot_start.selected_method == "fresh_lp_no_start"
+    assert pricing.hot_start.pricing_solver == "simplex"
+    assert pricing.hot_start.fixed_bounds_status == "applied_while_building_fresh_lp"
+    assert pricing.hot_start.relaxed_integrality_status == "applied_while_building_fresh_lp"
+    assert not pricing.hot_start.basis_attempted
+    assert not pricing.hot_start.basis_accepted
+    assert not pricing.hot_start.primal_start_attempted
+    assert not pricing.hot_start.primal_start_accepted
     assert pricing.hot_start.basis_valid_after_run
 
     commitment = np.rint(arrays["commitment"]).astype(int)
@@ -155,7 +163,7 @@ def test_hipo_root_and_required_resident_pricing_hot_start(tiny_case, tiny_confi
     assert pricing.hot_start.resident_model_reused
     assert pricing.hot_start.pricing_solver == "simplex"
     assert pricing.hot_start.basis_accepted or pricing.hot_start.primal_start_accepted
-    assert pricing.hot_start.selected_method != "none_checkpoint_resume"
+    assert pricing.hot_start.selected_method == "complete_primary_primal"
 
 
 def test_exact_pmin_is_active(tiny_case, tiny_config) -> None:

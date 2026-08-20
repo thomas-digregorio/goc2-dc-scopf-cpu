@@ -129,10 +129,9 @@ def _configure(highs: highspy.Highs, solver_config: dict, *, mip: bool) -> None:
     if mip:
         _set_option(highs, "mip_rel_gap", float(solver_config["mip_relative_gap"]))
         _set_option(highs, "mip_abs_gap", float(solver_config.get("mip_absolute_gap", 0.0)))
-        if "mip_lp_solver" in solver_config:
-            _set_option(highs, "mip_lp_solver", str(solver_config["mip_lp_solver"]))
-    elif "pricing_lp_solver" in solver_config:
-        _set_option(highs, "solver", str(solver_config["pricing_lp_solver"]))
+        _set_option(highs, "mip_lp_solver", str(solver_config.get("mip_lp_solver", "simplex")))
+    else:
+        _set_option(highs, "solver", str(solver_config.get("pricing_lp_solver", "simplex")))
 
 
 def _highs_model(
@@ -223,8 +222,10 @@ def solve_primary_milp(model: CanonicalModel, config: dict) -> PrimaryResult:
         raise RuntimeError(
             f"Primary MILP did not certify requested gap {target_gap}: {primary_stage.mip_gap}"
         )
-    basis = highs.getBasis()
-    return PrimaryResult(primary_stage, primary_objective, primary_values, highs, basis)
+    retain_resident = bool(solver_config.get("pricing_hot_start_required", False))
+    basis = highs.getBasis() if retain_resident else None
+    resident = highs if retain_resident else None
+    return PrimaryResult(primary_stage, primary_objective, primary_values, resident, basis)
 
 
 def solve_pricing_lp(model: CanonicalModel, config: dict, primary: PrimaryResult) -> PricingResult:
@@ -240,9 +241,9 @@ def solve_pricing_lp(model: CanonicalModel, config: dict, primary: PrimaryResult
     continuous_types = np.full(
         integer_columns.size, highspy.HighsVarType.kContinuous, dtype=np.uint8
     )
-    pricing_solver = str(solver_config.get("pricing_lp_solver", "choose"))
+    pricing_solver = str(solver_config.get("pricing_lp_solver", "simplex"))
 
-    resident_model_reused = primary.resident_highs is not None
+    resident_model_reused = bool(hot_start_required and primary.resident_highs is not None)
     if hot_start_required and not resident_model_reused:
         raise RuntimeError(
             "Pricing hot start requires the resident verified primary HiGHS model; "
@@ -325,7 +326,7 @@ def solve_pricing_lp(model: CanonicalModel, config: dict, primary: PrimaryResult
         primal_start_attempted = False
         primal_start_status = None
         primal_start_accepted = False
-        selected_method = "none_checkpoint_resume"
+        selected_method = "fresh_lp_no_start"
         solution_value_valid_before_run = bool(highs.getSolution().value_valid)
         basis_valid_before_run = bool(highs.getBasis().valid)
 

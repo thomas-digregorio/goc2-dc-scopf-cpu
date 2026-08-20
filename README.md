@@ -21,7 +21,9 @@ scope until the 617-bus acceptance gates pass and the user approves it.
 - one native HiGHS primary extensive MILP with no corrective-movement secondary objective;
 - immediate, durable primary-solution checkpointing;
 - a separate exhaustive checker that rereads the immutable source files before pricing;
-- a fixed-commitment pricing LP only after the independently checked primary passes.
+- a fixed-commitment pricing LP only after the independently checked primary passes;
+- by default, an explicit simplex primary with solver presolve on, followed by a fresh simplex
+  pricing LP with solver presolve on and no basis or primal start.
 
 The source curves are synthetic GO Challenge curves, not submitted ISO offers. Reported nodal
 prices are fixed-commitment, lossless-DC, security-constrained diagnostics—not PJM or CAISO
@@ -53,6 +55,11 @@ Development uses only tiny fixtures. After all preflight gates pass, each explic
 If a post-primary serialization, verification, or pricing failure occurs, `resume` may continue
 from the hashed primary checkpoint; it refuses to rerun the MILP and records the separate
 post-processing commit.
+
+The default configuration is
+`configs/GOC2-DC-D1-CORRECTIVE-v2-617-simplex-fresh-pricing.json`. Prior experiment
+configurations and their hashes remain frozen. Resident-model pricing hot starts are retained only
+in explicitly named experimental configurations and are not the default path.
 
 ## Attribution
 

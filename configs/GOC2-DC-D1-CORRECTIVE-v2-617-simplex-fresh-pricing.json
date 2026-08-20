@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/config.schema.json",
+  "config_version": 2,
+  "profile": "GOC2-DC-D1-CORRECTIVE-v2",
+  "scenario": "C2S6N00617/scenario_001",
+  "source_directory": "data/raw/extracted/C2S6N00617/scenario_001",
+  "source_manifest": "docs/source-manifest.json",
+  "result_directory": "results/official-617-simplex-fresh-pricing-cold-v2",
+  "run_lock": "results/official-617-simplex-fresh-pricing-cold-v2/.official-run-started.json",
+  "solver": {
+    "name": "HiGHS",
+    "mip_relative_gap": 0.001,
+    "mip_absolute_gap": 0.0,
+    "mip_lp_solver": "simplex",
+    "pricing_lp_solver": "simplex",
+    "pricing_hot_start_required": false,
+    "time_limit_seconds": null,
+    "threads": 0,
+    "random_seed": 0,
+    "presolve": "on",
+    "primal_feasibility_tolerance": 1e-7,
+    "dual_feasibility_tolerance": 1e-7,
+    "mip_feasibility_tolerance": 1e-6,
+    "console_logging": true
+  },
+  "numerics": {
+    "model_residual_tolerance_pu": 1e-6,
+    "security_violation_tolerance_pu": 1e-5,
+    "integrality_tolerance": 1e-6
+  }
+}
