@@ -79,17 +79,7 @@ class VariableLayout:
     states: tuple[StateLayout, ...]
     generator_segment_columns: tuple[tuple[int, ...], ...]
     load_segment_columns: tuple[tuple[int, ...], ...]
-    generation_deviation_start: int
-    load_deviation_start: int
     num_columns: int
-    num_gen: int
-    num_load: int
-
-    def generation_deviation(self, contingency_index: int, generator_index: int) -> int:
-        return self.generation_deviation_start + contingency_index * self.num_gen + generator_index
-
-    def load_deviation(self, contingency_index: int, load_index: int) -> int:
-        return self.load_deviation_start + contingency_index * self.num_load + load_index
 
 
 @dataclass(frozen=True)
@@ -97,7 +87,6 @@ class ModelMetadata:
     base_balance_rows: tuple[int, ...]
     balance_row_starts: tuple[int, ...]
     primary_objective_name: str
-    secondary_objective_name: str
 
 
 class SparseRows:
@@ -159,7 +148,6 @@ class CanonicalModel:
     column_lower: np.ndarray
     column_upper: np.ndarray
     primary_cost: np.ndarray
-    secondary_cost: np.ndarray
     integer_columns: np.ndarray
     rows: SparseRows
     metadata: ModelMetadata
@@ -198,19 +186,11 @@ def _make_layout(case: CaseData) -> VariableLayout:
         columns = tuple(range(next_column, next_column + len(load.benefit_segments)))
         load_segments.append(columns)
         next_column += len(columns)
-    generation_deviation_start = next_column
-    next_column += len(case.contingencies) * ng
-    load_deviation_start = next_column
-    next_column += len(case.contingencies) * nl
     return VariableLayout(
         states,
         tuple(generator_segments),
         tuple(load_segments),
-        generation_deviation_start,
-        load_deviation_start,
         next_column,
-        ng,
-        nl,
     )
 
 
@@ -222,7 +202,7 @@ def estimate_extensive_size(case: CaseData) -> dict[str, int]:
     ne = len(case.branches)
     nc = len(case.contingencies)
     base_rows = 1 + nb + ne + 5 * ng + 2 * nl
-    contingency_rows = nc * (1 + nb + ne + 9 * ng + 2 * nl + 2 * ng + 2 * nl)
+    contingency_rows = nc * (1 + nb + ne + 9 * ng + 2 * nl)
     segment_rows = ng + nl
     return {
         "columns": layout.num_columns,
@@ -237,7 +217,6 @@ def build_extensive_model(case: CaseData, config: dict) -> CanonicalModel:
     lower = np.full(ncol, -INF, dtype=np.float64)
     upper = np.full(ncol, INF, dtype=np.float64)
     primary = np.zeros(ncol, dtype=np.float64)
-    secondary = np.zeros(ncol, dtype=np.float64)
     integer_columns: list[int] = []
     base = layout.states[0]
     base_mva = case.base_mva
@@ -281,7 +260,9 @@ def build_extensive_model(case: CaseData, config: dict) -> CanonicalModel:
             upper[state.flow(branch_index)] = limit
 
     for g, generator in enumerate(case.generators):
-        for column, segment in zip(layout.generator_segment_columns[g], generator.cost_segments, strict=True):
+        for column, segment in zip(
+            layout.generator_segment_columns[g], generator.cost_segments, strict=True
+        ):
             lower[column] = 0.0
             upper[column] = segment.width_pu
             primary[column] = segment.marginal_per_mwh * base_mva * delta
@@ -289,29 +270,12 @@ def build_extensive_model(case: CaseData, config: dict) -> CanonicalModel:
         primary[base.startup(g)] = generator.startup_cost
         primary[base.shutdown(g)] = generator.shutdown_cost
     for load_index, load in enumerate(case.loads):
-        for column, segment in zip(layout.load_segment_columns[load_index], load.benefit_segments, strict=True):
+        for column, segment in zip(
+            layout.load_segment_columns[load_index], load.benefit_segments, strict=True
+        ):
             lower[column] = 0.0
             upper[column] = segment.width_pu
             primary[column] = -segment.marginal_per_mwh * base_mva * delta
-
-    secondary_config = config["secondary_objective"]
-    startup_weight = float(secondary_config["contingency_start_weight"])
-    generation_weight = float(secondary_config["normalized_generation_movement_weight"])
-    load_weight = float(secondary_config["normalized_load_movement_weight"])
-    floor_pu = float(secondary_config["normalization_floor_mw"]) / base_mva
-    for contingency_index in range(len(case.contingencies)):
-        state = layout.states[contingency_index + 1]
-        for g, generator in enumerate(case.generators):
-            column = layout.generation_deviation(contingency_index, g)
-            lower[column] = 0.0
-            upper[column] = INF
-            secondary[column] = generation_weight / max(abs(generator.pmax_pu), floor_pu)
-            secondary[state.startup(g)] += startup_weight
-        for load_index, load in enumerate(case.loads):
-            column = layout.load_deviation(contingency_index, load_index)
-            lower[column] = 0.0
-            upper[column] = INF
-            secondary[column] = load_weight / max(abs(load.pmax_pu), floor_pu)
 
     rows = SparseRows()
     bus_generators: list[list[int]] = [[] for _ in case.buses]
@@ -356,7 +320,11 @@ def build_extensive_model(case: CaseData, config: dict) -> CanonicalModel:
             susceptance = 1.0 / (branch.dc_reactance_pu * branch.tap_magnitude)
             rhs = -susceptance * branch.phase_shift_rad
             rows.add(
-                (state.flow(branch_index), state.theta(branch.from_bus_index), state.theta(branch.to_bus_index)),
+                (
+                    state.flow(branch_index),
+                    state.theta(branch.from_bus_index),
+                    state.theta(branch.to_bus_index),
+                ),
                 (1.0, -susceptance, susceptance),
                 rhs,
                 rhs,
@@ -370,16 +338,26 @@ def build_extensive_model(case: CaseData, config: dict) -> CanonicalModel:
             rows.add((pg, u), (1.0, -generator.pmax_pu), -INF, 0.0)
             rows.add((pg, u), (-1.0, generator.pmin_pu), -INF, 0.0)
             if state_index == 0:
-                rows.add((u, startup, shutdown), (1.0, -1.0, 1.0), generator.prior_on, generator.prior_on)
+                rows.add(
+                    (u, startup, shutdown), (1.0, -1.0, 1.0), generator.prior_on, generator.prior_on
+                )
                 rows.add(
                     (pg, u, startup),
-                    (1.0, -generator.ramp_up_base_pu_per_h * case.response_base_hours, -generator.pmin_pu),
+                    (
+                        1.0,
+                        -generator.ramp_up_base_pu_per_h * case.response_base_hours,
+                        -generator.pmin_pu,
+                    ),
                     -INF,
                     generator.prior_p_pu,
                 )
                 rows.add(
                     (pg, u, shutdown),
-                    (-1.0, -generator.ramp_down_base_pu_per_h * case.response_base_hours, -generator.pmax_pu),
+                    (
+                        -1.0,
+                        -generator.ramp_down_base_pu_per_h * case.response_base_hours,
+                        -generator.pmax_pu,
+                    ),
                     -INF,
                     -generator.prior_p_pu,
                 )
@@ -446,27 +424,6 @@ def build_extensive_model(case: CaseData, config: dict) -> CanonicalModel:
                     load.ramp_down_ctg_pu_per_h * case.response_ctg_hours,
                 )
 
-        if state_index > 0:
-            contingency_index = state_index - 1
-            for g in range(len(case.generators)):
-                deviation = layout.generation_deviation(contingency_index, g)
-                rows.add((state.pg(g), base.pg(g), deviation), (1.0, -1.0, -1.0), -INF, 0.0)
-                rows.add((base.pg(g), state.pg(g), deviation), (1.0, -1.0, -1.0), -INF, 0.0)
-            for load_index in range(len(case.loads)):
-                deviation = layout.load_deviation(contingency_index, load_index)
-                rows.add(
-                    (state.load(load_index), base.load(load_index), deviation),
-                    (1.0, -1.0, -1.0),
-                    -INF,
-                    0.0,
-                )
-                rows.add(
-                    (base.load(load_index), state.load(load_index), deviation),
-                    (1.0, -1.0, -1.0),
-                    -INF,
-                    0.0,
-                )
-
     for g, columns in enumerate(layout.generator_segment_columns):
         rows.add((base.pg(g), *columns), (1.0, *(-1.0 for _ in columns)), 0.0, 0.0)
     for load_index, columns in enumerate(layout.load_segment_columns):
@@ -478,13 +435,11 @@ def build_extensive_model(case: CaseData, config: dict) -> CanonicalModel:
         lower,
         upper,
         primary,
-        secondary,
         np.asarray(integer_columns, dtype=np.int32),
         rows,
         ModelMetadata(
             tuple(base_balance_rows),
             tuple(balance_row_starts),
             "base_source_cost_minus_authorized_load_benefit",
-            "corrective_startups_plus_normalized_absolute_redispatch",
         ),
     )

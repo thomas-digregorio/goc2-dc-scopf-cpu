@@ -1,4 +1,4 @@
-# GOC2-DC-D1-CORRECTIVE-v1
+# GOC2-DC-D1-CORRECTIVE-v2
 
 This repository implements a CPU, lossless-DC, GO Challenge 2-derived corrective
 security-constrained commitment and dispatch benchmark. It preserves source generator and
@@ -18,8 +18,10 @@ scope until the 617-bus acceptance gates pass and the user approves it.
 - `RATEA` in the base state and `RATEC` in contingency states;
 - fixed source topology except for the explicitly outaged device;
 - no load shedding, generation spillage, overload slack, or automatic feasibility repair;
-- native HiGHS extensive MILP, followed by a fixed-commitment pricing LP;
-- a separate exhaustive checker that rereads the immutable source files.
+- one native HiGHS primary extensive MILP with no corrective-movement secondary objective;
+- immediate, durable primary-solution checkpointing;
+- a separate exhaustive checker that rereads the immutable source files before pricing;
+- a fixed-commitment pricing LP only after the independently checked primary passes.
 
 The source curves are synthetic GO Challenge curves, not submitted ISO offers. Reported nodal
 prices are fixed-commitment, lossless-DC, security-constrained diagnostics—not PJM or CAISO
@@ -45,9 +47,8 @@ pwsh scripts/bootstrap.ps1
 pwsh scripts/fetch-617.ps1
 ```
 
-Development uses only tiny fixtures. After all preflight gates pass, the `benchmark` command is
-the sole authorized cold full-case run; it records a run lock so an accidental repetition is
-refused.
+Development uses only tiny fixtures. After all preflight gates pass, each explicitly authorized
+`benchmark` invocation is cold and records a run lock so an accidental repetition is refused.
 
 ## Attribution
 

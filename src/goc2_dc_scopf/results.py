@@ -11,7 +11,7 @@ import highspy
 import numpy as np
 import psutil
 
-from .highs import MilpResult, PricingResult
+from .highs import PricingResult, PrimaryResult
 from .model import CanonicalModel
 from .paths import require_local_path, sha256_file, write_json
 
@@ -91,20 +91,68 @@ def git_is_clean(root: Path) -> bool:
     return not completed.stdout.strip()
 
 
+def build_primary_checkpoint(
+    model: CanonicalModel,
+    config: dict,
+    config_sha256: str,
+    commit: str,
+    primary: PrimaryResult,
+    primary_artifact: dict[str, Any],
+    timings: dict[str, float],
+    peak_rss_bytes: int,
+) -> dict[str, Any]:
+    case = model.case
+    return {
+        "checkpoint_version": 1,
+        "status": "primary_solved",
+        "profile": case.profile,
+        "qualification": (
+            "Derived lossless-DC benchmark; not an official GO score or PJM/CAISO market "
+            "or reliability result."
+        ),
+        "source": {
+            "scenario": case.scenario,
+            "directory": case.source_directory,
+            "hashes": case.source_hashes,
+            "parser_commit": case.parser_commit,
+            "untranslated": list(case.untranslated),
+        },
+        "reproducibility": {"git_commit": commit, "config_sha256": config_sha256},
+        "run": {"cold_start": True, "initial_solution": "none"},
+        "solver": {
+            "name": "HiGHS",
+            "version": highspy.Highs().version(),
+            "configuration": config["solver"],
+            "primary": asdict(primary.primary),
+        },
+        "objectives": {
+            "primary_usd": primary.objective,
+            "primary_dual_bound_usd": primary.primary.dual_bound,
+            "primary_mip_gap": primary.primary.mip_gap,
+        },
+        "timings_seconds": dict(timings),
+        "peak_rss_bytes": int(peak_rss_bytes),
+        "model": model.statistics(),
+        "artifact": primary_artifact,
+        "checker": {"status": "pending"},
+    }
+
+
 def build_result_payload(
     model: CanonicalModel,
     config: dict,
     config_sha256: str,
     commit: str,
-    milp: MilpResult,
+    primary: PrimaryResult,
     pricing: PricingResult,
-    milp_artifact: dict[str, Any],
+    primary_artifact: dict[str, Any],
+    primary_checkpoint_artifact: dict[str, Any],
     pricing_artifact: dict[str, Any],
     timings: dict[str, float],
     peak_rss_bytes: int,
 ) -> dict[str, Any]:
     case = model.case
-    primal = physical_arrays(model, milp.column_values)
+    primal = physical_arrays(model, primary.column_values)
     base_mva = case.base_mva
     commitment = np.rint(primal["commitment"]).astype(np.int8)
     dispatch_mw = primal["generation_pu"] * base_mva
@@ -179,7 +227,7 @@ def build_result_payload(
 
     prices = -pricing.base_balance_duals / (base_mva * case.delta_hours)
     return {
-        "result_version": 1,
+        "result_version": 2,
         "profile": case.profile,
         "security_claim": "Secure in the modeled GO-style corrective state after the supplied contingency-response interval.",
         "qualification": "Derived lossless-DC benchmark; not an official GO score or PJM/CAISO market or reliability result.",
@@ -195,16 +243,13 @@ def build_result_payload(
             "name": "HiGHS",
             "version": highspy.Highs().version(),
             "configuration": config["solver"],
-            "primary": asdict(milp.primary),
-            "secondary": asdict(milp.secondary),
+            "primary": asdict(primary.primary),
             "pricing": asdict(pricing.summary),
         },
         "objectives": {
-            "primary_incumbent_usd": milp.primary_incumbent_objective,
-            "final_primary_usd": milp.final_primary_objective,
-            "primary_dual_bound_usd": milp.primary.dual_bound,
-            "primary_mip_gap": milp.primary.mip_gap,
-            "secondary": milp.final_secondary_objective,
+            "primary_usd": primary.objective,
+            "primary_dual_bound_usd": primary.primary.dual_bound,
+            "primary_mip_gap": primary.primary.mip_gap,
             "fixed_commitment_pricing_lp_usd": pricing.objective,
         },
         "timings_seconds": timings,
@@ -244,7 +289,11 @@ def build_result_payload(
             "base": binding_base,
             "contingency": binding_contingency,
         },
-        "artifacts": {"milp_primal": milp_artifact, "pricing_primal": pricing_artifact},
+        "artifacts": {
+            "primary_primal": primary_artifact,
+            "primary_checkpoint": primary_checkpoint_artifact,
+            "pricing_primal": pricing_artifact,
+        },
         "checker": {"status": "pending"},
     }
 

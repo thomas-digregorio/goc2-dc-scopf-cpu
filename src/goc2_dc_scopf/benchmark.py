@@ -5,12 +5,13 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from .checker import verify_result
-from .highs import solve_lexicographic, solve_pricing_lp
+from .checker import verify_primary_checkpoint, verify_result
+from .highs import solve_pricing_lp, solve_primary_milp
 from .model import build_extensive_model
 from .monitor import PeakMemoryMonitor, monotonic_seconds
 from .paths import require_local_path, resolve_from, sha256_file, write_json
 from .results import (
+    build_primary_checkpoint,
     build_result_payload,
     git_commit,
     git_is_clean,
@@ -71,30 +72,77 @@ def run_official_benchmark(root: Path, config_path: Path, config: dict) -> dict[
         timings["model_build"] = monotonic_seconds() - step
 
         step = monotonic_seconds()
-        milp = solve_lexicographic(model, config)
-        timings["milp_total"] = monotonic_seconds() - step
-        timings["primary_milp"] = milp.primary.wall_seconds
-        timings["secondary_milp"] = milp.secondary.wall_seconds
+        primary = solve_primary_milp(model, config)
+        timings["primary_milp_total"] = monotonic_seconds() - step
+        timings["primary_milp"] = primary.primary.wall_seconds
 
         step = monotonic_seconds()
-        pricing = solve_pricing_lp(model, config, milp.column_values)
+        primary_path = require_local_path(result_directory / "primary-primal.npz", "primary primal")
+        primary_hash = write_npz(primary_path, physical_arrays(model, primary.column_values))
+        checkpoint_path = require_local_path(
+            result_directory / "primary-checkpoint.json", "primary checkpoint"
+        )
+        checkpoint = build_primary_checkpoint(
+            model,
+            config,
+            config_hash,
+            commit,
+            primary,
+            _artifact(root, primary_path, primary_hash),
+            timings,
+            monitor.peak_rss_bytes,
+        )
+        save_result(checkpoint_path, checkpoint)
+        timings["primary_checkpoint_serialization"] = monotonic_seconds() - step
+        checkpoint["timings_seconds"] = dict(timings)
+        checkpoint["peak_rss_bytes"] = monitor.peak_rss_bytes
+        save_result(checkpoint_path, checkpoint)
+        lock.update(
+            {
+                "status": "primary_saved",
+                "primary_checkpoint": checkpoint_path.relative_to(root).as_posix(),
+                "primary_primal": primary_path.relative_to(root).as_posix(),
+                "primary_objective_usd": primary.objective,
+                "primary_dual_bound_usd": primary.primary.dual_bound,
+                "primary_mip_gap": primary.primary.mip_gap,
+            }
+        )
+        write_json(lock_path, lock)
+
+        step = monotonic_seconds()
+        primary_checker = verify_primary_checkpoint(root, config, checkpoint_path, config_path)
+        timings["independent_primary_verification"] = monotonic_seconds() - step
+        checkpoint = load_result(checkpoint_path)
+        checkpoint["timings_seconds"] = dict(timings)
+        checkpoint["peak_rss_bytes"] = monitor.peak_rss_bytes
+        save_result(checkpoint_path, checkpoint)
+        lock["primary_checker"] = primary_checker["status"]
+        if primary_checker["status"] != "pass":
+            lock["status"] = "failed_acceptance"
+            write_json(lock_path, lock)
+            raise RuntimeError(f"Primary solution failed independent acceptance: {primary_checker}")
+        lock["status"] = "primary_verified"
+        write_json(lock_path, lock)
+
+        step = monotonic_seconds()
+        pricing = solve_pricing_lp(model, config, primary.column_values)
         timings["pricing_lp"] = monotonic_seconds() - step
 
         step = monotonic_seconds()
-        milp_path = require_local_path(result_directory / "milp-primal.npz", "MILP primal")
         pricing_path = require_local_path(result_directory / "pricing-primal.npz", "pricing primal")
-        milp_hash = write_npz(milp_path, physical_arrays(model, milp.column_values))
         pricing_hash = write_npz(pricing_path, physical_arrays(model, pricing.column_values))
         result_path = require_local_path(result_directory / "result.json", "official result")
         preliminary_peak = monitor.peak_rss_bytes
+        checkpoint_hash = sha256_file(checkpoint_path)
         payload = build_result_payload(
             model,
             config,
             config_hash,
             commit,
-            milp,
+            primary,
             pricing,
-            _artifact(root, milp_path, milp_hash),
+            _artifact(root, primary_path, primary_hash),
+            _artifact(root, checkpoint_path, checkpoint_hash),
             _artifact(root, pricing_path, pricing_hash),
             timings,
             preliminary_peak,
@@ -132,9 +180,7 @@ def run_official_benchmark(root: Path, config_path: Path, config: dict) -> dict[
         return payload
     except BaseException as exc:
         peak = monitor.stop()
-        failure_status = (
-            lock["status"] if lock.get("status") == "failed_acceptance" else "failed"
-        )
+        failure_status = lock["status"] if lock.get("status") == "failed_acceptance" else "failed"
         lock.update(
             {
                 "status": failure_status,

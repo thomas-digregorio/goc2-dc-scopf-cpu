@@ -124,11 +124,19 @@ def _check_physical(
         for g, generator in enumerate(case.generators):
             failed = contingency is not None and contingency.generator_index == g
             if failed:
-                model.observe(abs(pg[state, g]), "outaged generator dispatch", (state, generator.key))
-                model.observe(abs(raw_u[state, g]), "outaged generator status", (state, generator.key))
+                model.observe(
+                    abs(pg[state, g]), "outaged generator dispatch", (state, generator.key)
+                )
+                model.observe(
+                    abs(raw_u[state, g]), "outaged generator status", (state, generator.key)
+                )
                 continue
-            model.observe(generator.pmin_pu * u[state, g] - pg[state, g], "PMIN", (state, generator.key))
-            model.observe(pg[state, g] - generator.pmax_pu * u[state, g], "PMAX", (state, generator.key))
+            model.observe(
+                generator.pmin_pu * u[state, g] - pg[state, g], "PMIN", (state, generator.key)
+            )
+            model.observe(
+                pg[state, g] - generator.pmax_pu * u[state, g], "PMAX", (state, generator.key)
+            )
             if state == 0:
                 previous_u = prior_u[g]
                 previous_p = prior_pg[g]
@@ -145,10 +153,22 @@ def _check_physical(
                 rd = generator.ramp_down_ctg_pu_per_h * case.response_ctg_hours
                 actual_start = max(int(u[state, g]) - int(previous_u), 0)
                 actual_stop = max(int(previous_u) - int(u[state, g]), 0)
-                model.observe(abs(startup[state, g] - actual_start), "startup indicator", (state, generator.key))
-                model.observe(abs(shutdown[state, g] - actual_stop), "shutdown indicator", (state, generator.key))
-                model.observe(base_start[g] + actual_stop - 1.0, "startup reversal", (state, generator.key))
-                model.observe(base_stop[g] + actual_start - 1.0, "shutdown reversal", (state, generator.key))
+                model.observe(
+                    abs(startup[state, g] - actual_start),
+                    "startup indicator",
+                    (state, generator.key),
+                )
+                model.observe(
+                    abs(shutdown[state, g] - actual_stop),
+                    "shutdown indicator",
+                    (state, generator.key),
+                )
+                model.observe(
+                    base_start[g] + actual_stop - 1.0, "startup reversal", (state, generator.key)
+                )
+                model.observe(
+                    base_stop[g] + actual_start - 1.0, "shutdown reversal", (state, generator.key)
+                )
             actual_start = max(int(u[state, g]) - int(previous_u), 0)
             actual_stop = max(int(previous_u) - int(u[state, g]), 0)
             model.observe(actual_start - su_qual, "startup permission", (state, generator.key))
@@ -183,7 +203,9 @@ def _check_physical(
         for branch_index, branch in enumerate(case.branches):
             outaged = contingency is not None and contingency.branch_index == branch_index
             if outaged:
-                model.observe(abs(flow[state, branch_index]), "outaged branch flow", (state, branch.key))
+                model.observe(
+                    abs(flow[state, branch_index]), "outaged branch flow", (state, branch.key)
+                )
                 continue
             expected_flow = (
                 theta[state, branch.from_bus_index]
@@ -226,6 +248,89 @@ def _objective(case: CaseData, arrays: dict[str, np.ndarray]) -> float:
     return float(value)
 
 
+def _check_primary_solution(
+    case: CaseData,
+    arrays: dict[str, np.ndarray],
+    solver_record: dict[str, Any],
+    objective_record: dict[str, Any],
+    config: dict,
+) -> dict[str, Any]:
+    model_violation, security_violation = _check_physical(case, arrays, fixed_commitment=None)
+    objective = _objective(case, arrays)
+    objective_error = abs(objective - float(objective_record["primary_usd"]))
+    objective_tolerance = max(1e-5, 1e-10 * abs(objective))
+    objective_pass = objective_error <= objective_tolerance
+    requested_gap = float(config["solver"]["mip_relative_gap"])
+    reported_gap = objective_record["primary_mip_gap"]
+    gap_pass = reported_gap is not None and float(reported_gap) <= requested_gap + 1e-12
+    solver_optimal = solver_record["model_status"] == "Optimal"
+    residual_tolerance = float(config["numerics"]["model_residual_tolerance_pu"])
+    security_tolerance = float(config["numerics"]["security_violation_tolerance_pu"])
+    passed = (
+        solver_optimal
+        and gap_pass
+        and objective_pass
+        and model_violation.maximum <= residual_tolerance
+        and security_violation.maximum <= security_tolerance
+    )
+    return {
+        "status": "pass" if passed else "fail",
+        "primary_solver_optimal": solver_optimal,
+        "mip_gap_pass": gap_pass,
+        "objective_pass": objective_pass,
+        "objective_tolerance_usd": objective_tolerance,
+        "maximum_model_residual_pu": model_violation.maximum,
+        "maximum_model_residual_detail": model_violation.__dict__,
+        "maximum_exhaustive_security_violation_pu": security_violation.maximum,
+        "maximum_security_violation_detail": security_violation.__dict__,
+        "recomputed_primary_objective_usd": objective,
+        "primary_objective_error_usd": objective_error,
+        "states_checked": case.states,
+        "source_contingencies_checked": len(case.contingencies),
+    }
+
+
+def verify_primary_checkpoint(
+    root: Path,
+    config: dict,
+    checkpoint_path: Path,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    root = require_local_path(root, "repository")
+    checkpoint_path = require_local_path(checkpoint_path, "primary checkpoint")
+    payload = load_result(checkpoint_path)
+    case = read_case(root, config)
+    if payload["profile"] != case.profile or payload["source"]["scenario"] != case.scenario:
+        raise ValueError("Primary checkpoint source identity does not match the registered case")
+    if payload["source"]["hashes"] != case.source_hashes:
+        raise ValueError("Primary checkpoint source hashes do not match freshly read inputs")
+    if config_path is not None:
+        config_path = require_local_path(config_path, "configuration")
+        if sha256_file(config_path) != payload["reproducibility"]["config_sha256"]:
+            raise ValueError(
+                "Primary checkpoint configuration hash does not match the registered file"
+            )
+
+    arrays = _validate_artifact(root, payload["artifact"])
+    summary = _check_primary_solution(
+        case,
+        arrays,
+        payload["solver"]["primary"],
+        payload["objectives"],
+        config,
+    )
+    payload["checker"] = summary
+    payload["status"] = "primary_verified" if summary["status"] == "pass" else "failed_acceptance"
+    checkpoint_schema = load_json(
+        require_local_path(
+            root / "schemas" / "primary-checkpoint.schema.json", "primary checkpoint schema"
+        )
+    )
+    Draft202012Validator(checkpoint_schema).validate(payload)
+    save_result(checkpoint_path, payload)
+    return summary
+
+
 def verify_result(
     root: Path, config: dict, result_path: Path, config_path: Path | None = None
 ) -> dict[str, Any]:
@@ -242,67 +347,83 @@ def verify_result(
         if sha256_file(config_path) != payload["reproducibility"]["config_sha256"]:
             raise ValueError("Result configuration hash does not match the registered file")
 
-    milp_arrays = _validate_artifact(root, payload["artifacts"]["milp_primal"])
+    checkpoint_record = payload["artifacts"]["primary_checkpoint"]
+    checkpoint_path = require_local_path(root / checkpoint_record["path"], "primary checkpoint")
+    if sha256_file(checkpoint_path).casefold() != str(checkpoint_record["sha256"]).casefold():
+        raise ValueError("Primary checkpoint SHA256 mismatch")
+    checkpoint = load_result(checkpoint_path)
+    if checkpoint["checker"]["status"] != "pass":
+        raise ValueError("Primary checkpoint did not pass independent verification before pricing")
+
+    primary_arrays = _validate_artifact(root, payload["artifacts"]["primary_primal"])
     pricing_arrays = _validate_artifact(root, payload["artifacts"]["pricing_primal"])
-    model_violation, security_violation = _check_physical(case, milp_arrays, fixed_commitment=None)
-    pricing_violation, pricing_security = _check_physical(
-        case, pricing_arrays, fixed_commitment=milp_arrays["commitment"]
+    primary_summary = _check_primary_solution(
+        case,
+        primary_arrays,
+        payload["solver"]["primary"],
+        payload["objectives"],
+        config,
     )
-    objective = _objective(case, milp_arrays)
+    pricing_violation, pricing_security = _check_physical(
+        case, pricing_arrays, fixed_commitment=primary_arrays["commitment"]
+    )
     pricing_objective = _objective(case, pricing_arrays)
-    objective_error = abs(objective - float(payload["objectives"]["final_primary_usd"]))
     pricing_objective_error = abs(
         pricing_objective - float(payload["objectives"]["fixed_commitment_pricing_lp_usd"])
     )
-    objective_tolerance = max(1e-5, 1e-10 * abs(objective))
-    objective_pass = objective_error <= objective_tolerance
+    objective_tolerance = float(primary_summary["objective_tolerance_usd"])
     pricing_objective_pass = pricing_objective_error <= objective_tolerance
 
     prices = payload["pricing"]["base_usd_per_mwh"]
     if len(prices) != len(case.buses) or not all(math.isfinite(float(x["price"])) for x in prices):
         raise ValueError("Pricing output is missing or nonfinite")
-    requested_gap = float(config["solver"]["mip_relative_gap"])
-    reported_gap = payload["objectives"]["primary_mip_gap"]
-    gap_pass = reported_gap is not None and float(reported_gap) <= requested_gap + 1e-12
     residual_tolerance = float(config["numerics"]["model_residual_tolerance_pu"])
     security_tolerance = float(config["numerics"]["security_violation_tolerance_pu"])
     pricing_optimal = payload["solver"]["pricing"]["model_status"] == "Optimal"
-    maximum_model = max(model_violation.maximum, pricing_violation.maximum)
-    maximum_security = max(security_violation.maximum, pricing_security.maximum)
+    maximum_model = max(
+        float(primary_summary["maximum_model_residual_pu"]), pricing_violation.maximum
+    )
+    maximum_security = max(
+        float(primary_summary["maximum_exhaustive_security_violation_pu"]),
+        pricing_security.maximum,
+    )
     passed = (
-        gap_pass
+        primary_summary["status"] == "pass"
         and maximum_model <= residual_tolerance
         and maximum_security <= security_tolerance
         and pricing_optimal
-        and objective_pass
         and pricing_objective_pass
     )
     summary = {
         "status": "pass" if passed else "fail",
-        "mip_gap_pass": gap_pass,
+        "primary_checkpoint_pass": checkpoint["checker"]["status"] == "pass",
+        "primary_solver_optimal": primary_summary["primary_solver_optimal"],
+        "mip_gap_pass": primary_summary["mip_gap_pass"],
         "pricing_lp_optimal": pricing_optimal,
-        "objective_pass": objective_pass,
+        "objective_pass": primary_summary["objective_pass"],
         "pricing_objective_pass": pricing_objective_pass,
         "objective_tolerance_usd": objective_tolerance,
         "maximum_model_residual_pu": maximum_model,
         "maximum_model_residual_detail": {
-            "milp": model_violation.__dict__,
+            "primary": primary_summary["maximum_model_residual_detail"],
             "pricing": pricing_violation.__dict__,
         },
         "maximum_exhaustive_security_violation_pu": maximum_security,
         "maximum_security_violation_detail": {
-            "milp": security_violation.__dict__,
+            "primary": primary_summary["maximum_security_violation_detail"],
             "pricing": pricing_security.__dict__,
         },
-        "recomputed_primary_objective_usd": objective,
-        "primary_objective_error_usd": objective_error,
+        "recomputed_primary_objective_usd": primary_summary["recomputed_primary_objective_usd"],
+        "primary_objective_error_usd": primary_summary["primary_objective_error_usd"],
         "recomputed_pricing_objective_usd": pricing_objective,
         "pricing_objective_error_usd": pricing_objective_error,
         "states_checked": case.states,
         "source_contingencies_checked": len(case.contingencies),
     }
     payload["checker"] = summary
-    result_schema = load_json(require_local_path(root / "schemas" / "result.schema.json", "result schema"))
+    result_schema = load_json(
+        require_local_path(root / "schemas" / "result.schema.json", "result schema")
+    )
     Draft202012Validator(result_schema).validate(payload)
     save_result(result_path, payload)
     return summary

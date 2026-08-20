@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/thomas-digregorio/goc2-dc-scopf-cpu/schemas/primary-checkpoint.schema.json",
+  "title": "GOC2 derived DC-SCOPF primary checkpoint",
+  "type": "object",
+  "required": [
+    "checkpoint_version",
+    "status",
+    "profile",
+    "qualification",
+    "source",
+    "reproducibility",
+    "run",
+    "solver",
+    "objectives",
+    "timings_seconds",
+    "model",
+    "artifact",
+    "checker"
+  ],
+  "properties": {
+    "checkpoint_version": {"const": 1},
+    "status": {"enum": ["primary_solved", "primary_verified", "failed_acceptance"]},
+    "profile": {"const": "GOC2-DC-D1-CORRECTIVE-v2"},
+    "run": {
+      "type": "object",
+      "required": ["cold_start", "initial_solution"],
+      "properties": {
+        "cold_start": {"const": true},
+        "initial_solution": {"const": "none"}
+      },
+      "additionalProperties": false
+    },
+    "solver": {
+      "type": "object",
+      "required": ["name", "version", "configuration", "primary"],
+      "not": {"required": ["secondary"]},
+      "additionalProperties": true
+    },
+    "objectives": {
+      "type": "object",
+      "required": ["primary_usd", "primary_dual_bound_usd", "primary_mip_gap"],
+      "additionalProperties": false
+    },
+    "artifact": {
+      "type": "object",
+      "required": ["path", "sha256", "bytes"],
+      "additionalProperties": false
+    },
+    "checker": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {"status": {"enum": ["pending", "pass", "fail"]}},
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

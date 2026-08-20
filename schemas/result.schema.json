@@ -23,8 +23,25 @@
     "checker"
   ],
   "properties": {
-    "result_version": {"const": 1},
-    "profile": {"const": "GOC2-DC-D1-CORRECTIVE-v1"},
+    "result_version": {"const": 2},
+    "profile": {"const": "GOC2-DC-D1-CORRECTIVE-v2"},
+    "solver": {
+      "type": "object",
+      "required": ["name", "version", "configuration", "primary", "pricing"],
+      "not": {"required": ["secondary"]},
+      "additionalProperties": true
+    },
+    "objectives": {
+      "type": "object",
+      "required": ["primary_usd", "primary_dual_bound_usd", "primary_mip_gap", "fixed_commitment_pricing_lp_usd"],
+      "not": {"required": ["secondary"]},
+      "additionalProperties": true
+    },
+    "artifacts": {
+      "type": "object",
+      "required": ["primary_primal", "primary_checkpoint", "pricing_primal"],
+      "additionalProperties": false
+    },
     "contingencies": {"type": "array", "minItems": 815, "maxItems": 815},
     "checker": {
       "type": "object",
@@ -35,4 +52,3 @@
   },
   "additionalProperties": true
 }
-

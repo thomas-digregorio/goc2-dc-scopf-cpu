@@ -125,12 +125,5 @@ def tiny_config() -> dict:
             "model_residual_tolerance_pu": 1e-6,
             "security_violation_tolerance_pu": 1e-5,
             "integrality_tolerance": 1e-6,
-            "primary_lexicographic_cap_usd": 1e-7,
-        },
-        "secondary_objective": {
-            "contingency_start_weight": 1.0,
-            "normalized_generation_movement_weight": 1.0,
-            "normalized_load_movement_weight": 1.0,
-            "normalization_floor_mw": 1.0,
         },
     }

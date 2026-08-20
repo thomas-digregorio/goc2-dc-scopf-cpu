@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "goc2-dc-scopf-cpu"
-version = "0.1.0"
+version = "0.2.0"
 description = "CPU lossless-DC corrective SCOPF benchmark derived from public GO Challenge 2 data"
 requires-python = ">=3.11"
 dependencies = [
@@ -32,4 +32,3 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-

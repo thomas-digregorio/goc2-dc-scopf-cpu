@@ -1,6 +1,6 @@
 # Model contract
 
-Profile: `GOC2-DC-D1-CORRECTIVE-v1`
+Profile: `GOC2-DC-D1-CORRECTIVE-v2`
 
 The immutable prior point supplies generator commitment and active dispatch. It is neither an
 optimized period nor a solver start. The MILP chooses one preventive base state and one conditional
@@ -35,12 +35,13 @@ Active fixed-shunt conductance is represented at 1.0 p.u. voltage. Reactive quan
 magnitudes, resistance losses, reactive shunts, AC recovery, and discretionary switching are
 excluded.
 
-The primary objective minimizes base production and commitment cost minus source-authorized base
-load benefit. Contingency states are feasibility certificates. At the registered MIP resolution,
-a second solve constrains the primary objective to the primary incumbent and minimizes normalized
-absolute corrective generation/load movement plus contingency startups. This intentionally differs
-from official Challenge 2 scoring.
+The sole MILP objective minimizes base production and commitment cost minus source-authorized base
+load benefit. Contingency states are feasibility certificates. There is no corrective-movement or
+contingency-startup secondary objective and no lexicographic re-solve. The primary primal vector,
+bound, and gap are durably checkpointed immediately after HiGHS returns.
 
-After all binaries are fixed, the complete continuous formulation is resolved. Negative base
-balance-row duals, converted from interval dollars per p.u. to dollars per MWh, are reported as
-fixed-commitment, lossless-DC, security-constrained nodal prices.
+An independent checker then rereads the immutable source files and exhaustively verifies the saved
+primary state and every supplied contingency. Pricing is attempted only after that gate passes.
+After all binaries are fixed to the verified primary values, the complete continuous formulation is
+resolved. Negative base balance-row duals, converted from interval dollars per p.u. to dollars per
+MWh, are reported as fixed-commitment, lossless-DC, security-constrained nodal prices.

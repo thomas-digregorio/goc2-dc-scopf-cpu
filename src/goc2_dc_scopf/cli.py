@@ -8,13 +8,13 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 
 from .benchmark import run_official_benchmark
-from .checker import verify_result
+from .checker import verify_primary_checkpoint, verify_result
 from .highs import validate_model_translation
 from .model import build_extensive_model, estimate_extensive_size
 from .paths import configure_local_runtime, load_json, repo_root, require_local_path, resolve_from
 from .source import audit_case, read_case
 
-DEFAULT_CONFIG = "configs/GOC2-DC-D1-CORRECTIVE-v1-617.json"
+DEFAULT_CONFIG = "configs/GOC2-DC-D1-CORRECTIVE-v2-617.json"
 
 
 def _arguments() -> argparse.Namespace:
@@ -22,12 +22,22 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--config", default=DEFAULT_CONFIG, help="JSON configuration path")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("ingest", help="hash, parse, and audit the immutable source scenario")
-    preflight = subparsers.add_parser("preflight", help="estimate or build the extensive model without solving")
-    preflight.add_argument("--build", action="store_true", help="construct the complete sparse matrix")
-    preflight.add_argument(
-        "--pass-highs", action="store_true", help="pass the constructed model to HiGHS without solving"
+    preflight = subparsers.add_parser(
+        "preflight", help="estimate or build the extensive model without solving"
     )
-    subparsers.add_parser("benchmark", help="perform the sole cold official benchmark run")
+    preflight.add_argument(
+        "--build", action="store_true", help="construct the complete sparse matrix"
+    )
+    preflight.add_argument(
+        "--pass-highs",
+        action="store_true",
+        help="pass the constructed model to HiGHS without solving",
+    )
+    subparsers.add_parser("benchmark", help="perform one cold official benchmark run")
+    verify_primary = subparsers.add_parser(
+        "verify-primary", help="independently reverify a saved primary checkpoint"
+    )
+    verify_primary.add_argument("checkpoint", help="primary-checkpoint.json path")
     verify = subparsers.add_parser("verify", help="independently reverify an existing result")
     verify.add_argument("result", help="result.json path")
     return parser.parse_args()
@@ -60,7 +70,17 @@ def main() -> None:
         return
     if args.command == "benchmark":
         payload = run_official_benchmark(root, config_path, config)
-        print(json.dumps({"official_run": payload["official_run"], "checker": payload["checker"]}, indent=2))
+        print(
+            json.dumps(
+                {"official_run": payload["official_run"], "checker": payload["checker"]}, indent=2
+            )
+        )
+        return
+    if args.command == "verify-primary":
+        checkpoint = require_local_path(Path(args.checkpoint), "primary checkpoint")
+        print(
+            json.dumps(verify_primary_checkpoint(root, config, checkpoint, config_path), indent=2)
+        )
         return
     if args.command == "verify":
         result = require_local_path(Path(args.result), "result JSON")

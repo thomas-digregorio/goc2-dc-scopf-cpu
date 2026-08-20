@@ -1,6 +1,6 @@
 {
   "manifest_version": 1,
-  "profile": "GOC2-DC-D1-CORRECTIVE-v1",
+  "profile": "GOC2-DC-D1-CORRECTIVE-v2",
   "selection_frozen_utc": "2026-08-19T00:00:00Z",
   "selection_rule": "Lexicographically first valid scenario directory in the pinned C2S6N00617 archive, chosen before optimization.",
   "archive": {
@@ -34,4 +34,3 @@
     "license": "public domain"
   }
 }
-
