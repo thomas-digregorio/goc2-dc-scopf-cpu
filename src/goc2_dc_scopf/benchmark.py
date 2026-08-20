@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import shutil
 import traceback
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from .checker import verify_primary_checkpoint, verify_result
 from .highs import solve_pricing_lp, solve_primary_milp
@@ -17,6 +20,7 @@ from .results import (
     git_is_clean,
     load_result,
     physical_arrays,
+    pricing_arrays,
     primary_result_from_checkpoint,
     read_npz,
     save_result,
@@ -132,7 +136,7 @@ def run_official_benchmark(root: Path, config_path: Path, config: dict) -> dict[
 
         step = monotonic_seconds()
         pricing_path = require_local_path(result_directory / "pricing-primal.npz", "pricing primal")
-        pricing_hash = write_npz(pricing_path, physical_arrays(model, pricing.column_values))
+        pricing_hash = write_npz(pricing_path, pricing_arrays(model, pricing))
         result_path = require_local_path(result_directory / "result.json", "official result")
         preliminary_peak = monitor.peak_rss_bytes
         checkpoint_hash = sha256_file(checkpoint_path)
@@ -276,7 +280,7 @@ def resume_saved_primary(root: Path, config_path: Path, config: dict) -> dict[st
 
         step = monotonic_seconds()
         pricing_path = require_local_path(result_directory / "pricing-primal.npz", "pricing primal")
-        pricing_hash = write_npz(pricing_path, physical_arrays(model, pricing.column_values))
+        pricing_hash = write_npz(pricing_path, pricing_arrays(model, pricing))
         checkpoint_hash = sha256_file(checkpoint_path)
         payload = build_result_payload(
             model,
@@ -344,3 +348,108 @@ def resume_saved_primary(root: Path, config_path: Path, config: dict) -> dict[st
         )
         write_json(lock_path, lock)
         raise
+
+
+def repair_inverted_price_sign(root: Path, config_path: Path, config: dict) -> dict[str, Any]:
+    """Repair the one known v2 sign-reporting defect without invoking an optimizer."""
+    root = require_local_path(root, "repository")
+    config_path = require_local_path(config_path, "configuration")
+    result_directory = resolve_from(root, config["result_directory"], "result directory")
+    lock_path = resolve_from(root, config["run_lock"], "official-run lock")
+    result_path = require_local_path(result_directory / "result.json", "official result")
+    if not result_path.exists() or not lock_path.exists():
+        raise RuntimeError("An existing official result and run lock are required")
+    if not git_is_clean(root):
+        raise RuntimeError("Price-reporting repair requires a clean, frozen Git worktree")
+
+    payload = load_result(result_path)
+    lock = load_result(lock_path)
+    legacy_postprocess_commit = "b80148fa028b88e4f372f76e42efd88e659fdee6"
+    if (
+        payload.get("reproducibility", {}).get("postprocess_git_commit")
+        != legacy_postprocess_commit
+    ):
+        raise RuntimeError(
+            "Result was not produced by the one known sign-inverted reporting commit"
+        )
+    if "dual_sign_convention" in payload.get("pricing", {}):
+        raise RuntimeError(
+            "Price dual sign convention is already present; refusing a second repair"
+        )
+    if sha256_file(config_path) != payload["reproducibility"]["config_sha256"]:
+        raise RuntimeError("Result configuration hash does not match the registered file")
+
+    case = read_case(root, config)
+    prices = payload["pricing"]["base_usd_per_mwh"]
+    if len(prices) != len(case.buses):
+        raise RuntimeError("Saved price count does not match the registered buses")
+    corrected_prices = -np.asarray([float(record["price"]) for record in prices])
+
+    pricing_record = payload["artifacts"]["pricing_primal"]
+    pricing_path = require_local_path(root / pricing_record["path"], "pricing primal")
+    if sha256_file(pricing_path).casefold() != str(pricing_record["sha256"]).casefold():
+        raise RuntimeError("Pricing artifact hash does not match the accepted result")
+    arrays = read_npz(pricing_path)
+    if "base_balance_duals" in arrays:
+        raise RuntimeError(
+            "Pricing artifact already contains duals; refusing legacy reconstruction"
+        )
+    legacy_directory = require_local_path(
+        result_directory / "legacy-sign-inverted", "legacy price-reporting evidence"
+    )
+    if legacy_directory.exists():
+        raise RuntimeError(
+            "Legacy price-reporting evidence already exists; refusing a second repair"
+        )
+    legacy_directory.mkdir(parents=True)
+    legacy_result_path = require_local_path(
+        legacy_directory / "result.json", "legacy result evidence"
+    )
+    legacy_pricing_path = require_local_path(
+        legacy_directory / "pricing-primal.npz", "legacy pricing evidence"
+    )
+    shutil.copy2(result_path, legacy_result_path)
+    shutil.copy2(pricing_path, legacy_pricing_path)
+    arrays["base_balance_duals"] = corrected_prices * case.base_mva * case.delta_hours
+    pricing_hash = write_npz(pricing_path, arrays)
+
+    for record, price in zip(prices, corrected_prices, strict=True):
+        record["price"] = float(price)
+    payload["pricing"]["dual_sign_convention"] = (
+        "HiGHS base nodal-balance row_dual divided by baseMVA and interval hours; "
+        "generation has coefficient +1."
+    )
+    payload["pricing"]["dual_provenance"] = (
+        "Reconstructed exactly from the legacy sign-inverted reported values; no LP rerun."
+    )
+    payload["artifacts"]["pricing_primal"] = _artifact(root, pricing_path, pricing_hash)
+    payload["legacy_price_reporting_artifacts"] = {
+        "result": _artifact(root, legacy_result_path, sha256_file(legacy_result_path)),
+        "pricing_primal": _artifact(root, legacy_pricing_path, sha256_file(legacy_pricing_path)),
+    }
+    repair_commit = git_commit(root)
+    payload["reproducibility"]["price_reporting_git_commit"] = repair_commit
+    payload["official_run"]["price_reporting_corrected_without_resolve"] = True
+    save_result(result_path, payload)
+
+    checker = verify_result(root, config, result_path, config_path)
+    if checker["status"] != "pass":
+        lock.update(
+            {
+                "status": "failed_acceptance",
+                "checker": checker["status"],
+                "price_reporting_git_commit": repair_commit,
+            }
+        )
+        write_json(lock_path, lock)
+        raise RuntimeError(f"Price-reporting repair failed independent acceptance: {checker}")
+    lock.update(
+        {
+            "status": "success",
+            "checker": "pass",
+            "price_reporting_git_commit": repair_commit,
+            "price_reporting_corrected_without_resolve": True,
+        }
+    )
+    write_json(lock_path, lock)
+    return load_result(result_path)

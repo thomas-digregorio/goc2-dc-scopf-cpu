@@ -43,5 +43,8 @@ bound, and gap are durably checkpointed immediately after HiGHS returns.
 An independent checker then rereads the immutable source files and exhaustively verifies the saved
 primary state and every supplied contingency. Pricing is attempted only after that gate passes.
 After all binaries are fixed to the verified primary values, the complete continuous formulation is
-resolved. Negative base balance-row duals, converted from interval dollars per p.u. to dollars per
-MWh, are reported as fixed-commitment, lossless-DC, security-constrained nodal prices.
+resolved. Base balance-row duals, converted from interval dollars per p.u. to dollars per
+MWh, are reported as fixed-commitment, lossless-DC, security-constrained nodal prices. Under the
+implemented balance convention, generation has coefficient `+1`, so the HiGHS equality-row dual is
+divided by `baseMVA * interval_hours` without a sign reversal. The raw base balance duals are retained
+with the pricing primal and independently checked against every reported price.

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-from .benchmark import resume_saved_primary, run_official_benchmark
+from .benchmark import repair_inverted_price_sign, resume_saved_primary, run_official_benchmark
 from .checker import verify_primary_checkpoint, verify_result
 from .highs import validate_model_translation
 from .model import build_extensive_model, estimate_extensive_size
@@ -37,6 +37,10 @@ def _arguments() -> argparse.Namespace:
     subparsers.add_parser(
         "resume",
         help="resume verification and pricing from a retained primary without rerunning the MILP",
+    )
+    subparsers.add_parser(
+        "repair-price-sign",
+        help="repair the one known v2 price-sign defect without rerunning an optimizer",
     )
     verify_primary = subparsers.add_parser(
         "verify-primary", help="independently reverify a saved primary checkpoint"
@@ -88,6 +92,10 @@ def main() -> None:
                 indent=2,
             )
         )
+        return
+    if args.command == "repair-price-sign":
+        payload = repair_inverted_price_sign(root, config_path, config)
+        print(json.dumps({"pricing": payload["pricing"], "checker": payload["checker"]}, indent=2))
         return
     if args.command == "verify-primary":
         checkpoint = require_local_path(Path(args.checkpoint), "primary checkpoint")

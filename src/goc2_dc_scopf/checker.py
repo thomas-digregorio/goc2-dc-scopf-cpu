@@ -9,7 +9,7 @@ import numpy as np
 from jsonschema import Draft202012Validator
 
 from .paths import load_json, require_local_path, sha256_file
-from .results import load_result, read_npz, save_result
+from .results import base_prices_from_duals, load_result, read_npz, save_result
 from .source import CaseData, CostSegment, read_case
 
 
@@ -377,6 +377,16 @@ def verify_result(
     prices = payload["pricing"]["base_usd_per_mwh"]
     if len(prices) != len(case.buses) or not all(math.isfinite(float(x["price"])) for x in prices):
         raise ValueError("Pricing output is missing or nonfinite")
+    if "base_balance_duals" not in pricing_arrays:
+        raise ValueError("Pricing artifact is missing base nodal-balance duals")
+    _shape("base_balance_duals", pricing_arrays["base_balance_duals"], (len(case.buses),))
+    reported_prices = np.asarray([float(x["price"]) for x in prices], dtype=np.float64)
+    expected_prices = base_prices_from_duals(
+        pricing_arrays["base_balance_duals"], case.base_mva, case.delta_hours
+    )
+    price_dual_error = float(np.max(np.abs(reported_prices - expected_prices)))
+    price_dual_tolerance = max(1e-8, 1e-10 * float(np.max(np.abs(expected_prices))))
+    price_dual_pass = price_dual_error <= price_dual_tolerance
     residual_tolerance = float(config["numerics"]["model_residual_tolerance_pu"])
     security_tolerance = float(config["numerics"]["security_violation_tolerance_pu"])
     pricing_optimal = payload["solver"]["pricing"]["model_status"] == "Optimal"
@@ -393,6 +403,7 @@ def verify_result(
         and maximum_security <= security_tolerance
         and pricing_optimal
         and pricing_objective_pass
+        and price_dual_pass
     )
     summary = {
         "status": "pass" if passed else "fail",
@@ -402,6 +413,9 @@ def verify_result(
         "pricing_lp_optimal": pricing_optimal,
         "objective_pass": primary_summary["objective_pass"],
         "pricing_objective_pass": pricing_objective_pass,
+        "pricing_dual_consistency_pass": price_dual_pass,
+        "pricing_dual_consistency_error_usd_per_mwh": price_dual_error,
+        "pricing_dual_consistency_tolerance_usd_per_mwh": price_dual_tolerance,
         "objective_tolerance_usd": objective_tolerance,
         "maximum_model_residual_pu": maximum_model,
         "maximum_model_residual_detail": {

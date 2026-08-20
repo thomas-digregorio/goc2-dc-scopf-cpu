@@ -12,9 +12,11 @@ from goc2_dc_scopf.checker import _check_physical, _check_primary_solution, _obj
 from goc2_dc_scopf.highs import solve_pricing_lp, solve_primary_milp
 from goc2_dc_scopf.model import build_extensive_model
 from goc2_dc_scopf.results import (
+    base_prices_from_duals,
     build_primary_checkpoint,
     build_result_payload,
     physical_arrays,
+    pricing_arrays,
     primary_result_from_checkpoint,
 )
 
@@ -24,17 +26,25 @@ def test_tiny_primary_milp_and_pricing(tiny_case, tiny_config) -> None:
     primary = solve_primary_milp(model, tiny_config)
     pricing = solve_pricing_lp(model, tiny_config, primary.column_values)
     arrays = physical_arrays(model, primary.column_values)
-    pricing_arrays = physical_arrays(model, pricing.column_values)
+    pricing_primal = physical_arrays(model, pricing.column_values)
     violation, security = _check_physical(tiny_case, arrays, fixed_commitment=None)
     pricing_violation, pricing_security = _check_physical(
-        tiny_case, pricing_arrays, fixed_commitment=arrays["commitment"]
+        tiny_case, pricing_primal, fixed_commitment=arrays["commitment"]
     )
     assert violation.maximum <= 1e-7
     assert security.maximum <= 1e-7
     assert pricing_violation.maximum <= 1e-7
     assert pricing_security.maximum <= 1e-7
     assert abs(_objective(tiny_case, arrays) - primary.objective) <= 1e-7
-    assert abs(_objective(tiny_case, pricing_arrays) - pricing.objective) <= 1e-7
+    assert abs(_objective(tiny_case, pricing_primal) - pricing.objective) <= 1e-7
+    prices = base_prices_from_duals(
+        pricing.base_balance_duals, tiny_case.base_mva, tiny_case.delta_hours
+    )
+    assert prices.tolist() == pytest.approx([10.0, 10.0, 10.0])
+    retained_pricing = pricing_arrays(model, pricing)
+    assert retained_pricing["base_balance_duals"].tolist() == pytest.approx(
+        pricing.base_balance_duals.tolist()
+    )
 
     commitment = np.rint(arrays["commitment"]).astype(int)
     assert commitment[0].tolist() == [1, 0]
@@ -98,8 +108,12 @@ def test_tiny_primary_milp_and_pricing(tiny_case, tiny_config) -> None:
     assert payload["objectives"]["primary_usd"] == pytest.approx(primary.objective)
     assert "secondary" not in payload["solver"]
     assert "secondary" not in payload["objectives"]
+    assert [record["price"] for record in payload["pricing"]["base_usd_per_mwh"]] == pytest.approx(
+        [10.0, 10.0, 10.0]
+    )
     payload["profile"] = "GOC2-DC-D1-CORRECTIVE-v2"
     payload["contingencies"] = [{} for _ in range(815)]
+    payload["pricing"]["base_usd_per_mwh"] = [{"bus": bus, "price": 10.0} for bus in range(617)]
     result_schema = json.loads(
         (Path(__file__).parents[1] / "schemas" / "result.schema.json").read_text(encoding="utf-8")
     )

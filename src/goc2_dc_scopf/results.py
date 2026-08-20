@@ -61,6 +61,19 @@ def physical_arrays(model: CanonicalModel, values: np.ndarray) -> dict[str, np.n
     return arrays
 
 
+def base_prices_from_duals(
+    base_balance_duals: np.ndarray, base_mva: float, interval_hours: float
+) -> np.ndarray:
+    """Convert HiGHS equality-row duals to $/MWh for +generation nodal balances."""
+    return np.asarray(base_balance_duals, dtype=np.float64) / (base_mva * interval_hours)
+
+
+def pricing_arrays(model: CanonicalModel, pricing: PricingResult) -> dict[str, np.ndarray]:
+    arrays = physical_arrays(model, pricing.column_values)
+    arrays["base_balance_duals"] = np.asarray(pricing.base_balance_duals, dtype=np.float64)
+    return arrays
+
+
 def write_npz(path: Path, arrays: dict[str, np.ndarray]) -> str:
     path = require_local_path(path, "result array")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -246,7 +259,7 @@ def build_result_payload(
                     }
                 )
 
-    prices = -pricing.base_balance_duals / (base_mva * case.delta_hours)
+    prices = base_prices_from_duals(pricing.base_balance_duals, base_mva, case.delta_hours)
     return {
         "result_version": 2,
         "profile": case.profile,
@@ -305,6 +318,10 @@ def build_result_payload(
         "contingency_fast_starts": fast_starts,
         "pricing": {
             "description": "Fixed-commitment, lossless-DC, security-constrained nodal prices.",
+            "dual_sign_convention": (
+                "HiGHS base nodal-balance row_dual divided by baseMVA and interval hours; "
+                "generation has coefficient +1."
+            ),
             "base_usd_per_mwh": [
                 {"bus": bus.number, "price": float(prices[i])} for i, bus in enumerate(case.buses)
             ],

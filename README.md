@@ -25,7 +25,8 @@ scope until the 617-bus acceptance gates pass and the user approves it.
 
 The source curves are synthetic GO Challenge curves, not submitted ISO offers. Reported nodal
 prices are fixed-commitment, lossless-DC, security-constrained diagnostics—not PJM or CAISO
-settlement LMPs.
+settlement LMPs. Raw base balance-row duals are retained, and the checker verifies the documented
+HiGHS dual-to-$/MWh sign and unit conversion.
 
 See [docs/model-contract.md](docs/model-contract.md) and
 [docs/source-manifest.json](docs/source-manifest.json) for the frozen details. The non-solving

@@ -47,6 +47,16 @@
       },
       "additionalProperties": false
     },
+    "pricing": {
+      "type": "object",
+      "required": ["description", "dual_sign_convention", "base_usd_per_mwh"],
+      "properties": {
+        "description": {"type": "string", "minLength": 1},
+        "dual_sign_convention": {"type": "string", "minLength": 1},
+        "base_usd_per_mwh": {"type": "array", "minItems": 617, "maxItems": 617}
+      },
+      "additionalProperties": true
+    },
     "contingencies": {"type": "array", "minItems": 815, "maxItems": 815},
     "checker": {
       "type": "object",
