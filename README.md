@@ -26,7 +26,8 @@ prices are fixed-commitment, lossless-DC, security-constrained diagnostics—not
 settlement LMPs.
 
 See [docs/model-contract.md](docs/model-contract.md) and
-[docs/source-manifest.json](docs/source-manifest.json) for the frozen details.
+[docs/source-manifest.json](docs/source-manifest.json) for the frozen details. The non-solving
+[617-bus preflight](docs/preflight-617.md) records source translation and matrix-size gates.
 
 ## Local-only setup
 
@@ -55,4 +56,3 @@ Parsing uses the public-domain
 [GOCompetition/C2DataUtilities](https://github.com/GOCompetition/C2DataUtilities) repository,
 pinned as a Git submodule. HiGHS and the Python dependencies retain their own licenses. No project
 license is granted by this repository at this time.
-

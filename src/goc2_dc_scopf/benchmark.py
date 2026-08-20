@@ -132,9 +132,12 @@ def run_official_benchmark(root: Path, config_path: Path, config: dict) -> dict[
         return payload
     except BaseException as exc:
         peak = monitor.stop()
+        failure_status = (
+            lock["status"] if lock.get("status") == "failed_acceptance" else "failed"
+        )
         lock.update(
             {
-                "status": "failed",
+                "status": failure_status,
                 "completed_utc": _utc_now(),
                 "peak_rss_bytes": peak,
                 "elapsed_seconds": monotonic_seconds() - total_start,

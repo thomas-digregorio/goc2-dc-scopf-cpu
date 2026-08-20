@@ -456,7 +456,7 @@ def audit_case(case: CaseData) -> dict[str, Any]:
             "generators": len(case.generators),
             "prior_online_generators": sum(g.prior_on for g in case.generators),
             "branches": len(case.branches),
-            "line_contingencies": sum(c.kind == "branch" for c in case.contingencies),
+            "branch_contingencies": sum(c.kind == "branch" for c in case.contingencies),
             "generator_contingencies": sum(c.kind == "generator" for c in case.contingencies),
             "contingencies": len(case.contingencies),
             "states": case.states,
@@ -477,6 +477,7 @@ def audit_case(case: CaseData) -> dict[str, Any]:
                 abs(b.impedance_correction_factor - 1.0) > 1e-12 for b in case.branches
             ),
             "active_shunts": sum(abs(s.conductance_pu) > 1e-12 for s in case.fixed_shunts),
+            "angle_difference_limits": "not supplied in the selected source profile",
         },
         "untranslated": list(case.untranslated),
     }

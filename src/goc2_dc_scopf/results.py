@@ -122,7 +122,10 @@ def build_result_payload(
         current_u = commitment[state]
         changes = []
         for g in np.flatnonzero(current_u != base_u):
-            change = "start" if current_u[g] > base_u[g] else "shutdown"
+            if contingency.generator_index == int(g):
+                change = "forced_outage"
+            else:
+                change = "start" if current_u[g] > base_u[g] else "shutdown"
             record = {**_identity(case.generators[int(g)].key), "change": change}
             changes.append(record)
             if change == "start":

@@ -28,6 +28,9 @@ The lossless DC branch equations use source reactance, fixed tap magnitude, and 
 Where the source activates a transformer impedance-correction table, its factor is interpolated at
 that frozen tap/phase operating point and retained explicitly; the DC series reactance is source
 X12 multiplied by that factor, consistent with the source evaluator's admittance convention.
+The selected source profile supplies no separate branch angle-difference limits. Source line-current
+and transformer-apparent-power ratings are used as active-power bounds under the 1.0 p.u. lossless-DC
+voltage convention.
 Active fixed-shunt conductance is represented at 1.0 p.u. voltage. Reactive quantities, voltage
 magnitudes, resistance losses, reactive shunts, AC recovery, and discretionary switching are
 excluded.

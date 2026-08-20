@@ -116,6 +116,9 @@ def tiny_config() -> dict:
             "threads": 1,
             "random_seed": 0,
             "presolve": "on",
+            "primal_feasibility_tolerance": 1e-7,
+            "dual_feasibility_tolerance": 1e-7,
+            "mip_feasibility_tolerance": 1e-6,
             "console_logging": False,
         },
         "numerics": {
@@ -131,4 +134,3 @@ def tiny_config() -> dict:
             "normalization_floor_mw": 1.0,
         },
     }
-

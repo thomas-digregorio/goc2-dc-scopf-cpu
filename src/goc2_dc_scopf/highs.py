@@ -79,6 +79,22 @@ def _configure(highs: highspy.Highs, solver_config: dict, *, mip: bool) -> None:
     _set_option(highs, "log_to_console", console)
     _set_option(highs, "presolve", str(solver_config.get("presolve", "on")))
     _set_option(highs, "random_seed", int(solver_config.get("random_seed", 0)))
+    _set_option(
+        highs,
+        "primal_feasibility_tolerance",
+        float(solver_config.get("primal_feasibility_tolerance", 1e-7)),
+    )
+    _set_option(
+        highs,
+        "dual_feasibility_tolerance",
+        float(solver_config.get("dual_feasibility_tolerance", 1e-7)),
+    )
+    if mip:
+        _set_option(
+            highs,
+            "mip_feasibility_tolerance",
+            float(solver_config.get("mip_feasibility_tolerance", 1e-6)),
+        )
     threads = int(solver_config.get("threads", 0))
     _set_option(highs, "threads", threads)
     time_limit = solver_config.get("time_limit_seconds")

@@ -15,6 +15,9 @@
     "threads": 0,
     "random_seed": 0,
     "presolve": "on",
+    "primal_feasibility_tolerance": 1e-7,
+    "dual_feasibility_tolerance": 1e-7,
+    "mip_feasibility_tolerance": 1e-6,
     "console_logging": true
   },
   "numerics": {

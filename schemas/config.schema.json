@@ -27,7 +27,7 @@
     "run_lock": {"type": "string", "minLength": 1},
     "solver": {
       "type": "object",
-      "required": ["name", "mip_relative_gap", "threads", "random_seed", "presolve", "console_logging"],
+      "required": ["name", "mip_relative_gap", "threads", "random_seed", "presolve", "primal_feasibility_tolerance", "dual_feasibility_tolerance", "mip_feasibility_tolerance", "console_logging"],
       "properties": {
         "name": {"const": "HiGHS"},
         "mip_relative_gap": {"const": 0.001},
@@ -36,6 +36,9 @@
         "threads": {"type": "integer", "minimum": 0},
         "random_seed": {"type": "integer"},
         "presolve": {"enum": ["on", "off", "choose"]},
+        "primal_feasibility_tolerance": {"type": "number", "exclusiveMinimum": 0},
+        "dual_feasibility_tolerance": {"type": "number", "exclusiveMinimum": 0},
+        "mip_feasibility_tolerance": {"type": "number", "exclusiveMinimum": 0},
         "console_logging": {"type": "boolean"}
       },
       "additionalProperties": false
@@ -64,4 +67,3 @@
     }
   }
 }
-
