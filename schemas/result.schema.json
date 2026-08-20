@@ -40,6 +40,11 @@
     "artifacts": {
       "type": "object",
       "required": ["primary_primal", "primary_checkpoint", "pricing_primal"],
+      "properties": {
+        "primary_primal": {"$ref": "#/$defs/artifact"},
+        "primary_checkpoint": {"$ref": "#/$defs/artifact"},
+        "pricing_primal": {"$ref": "#/$defs/artifact"}
+      },
       "additionalProperties": false
     },
     "contingencies": {"type": "array", "minItems": 815, "maxItems": 815},
@@ -48,6 +53,18 @@
       "required": ["status"],
       "properties": {"status": {"enum": ["pending", "pass", "fail"]}},
       "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "required": ["path", "sha256", "bytes"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "bytes": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": true

@@ -17,6 +17,8 @@ from .results import (
     git_is_clean,
     load_result,
     physical_arrays,
+    primary_result_from_checkpoint,
+    read_npz,
     save_result,
     write_npz,
 )
@@ -187,6 +189,154 @@ def run_official_benchmark(root: Path, config_path: Path, config: dict) -> dict[
                 "completed_utc": _utc_now(),
                 "peak_rss_bytes": peak,
                 "elapsed_seconds": monotonic_seconds() - total_start,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+            }
+        )
+        write_json(lock_path, lock)
+        raise
+
+
+def resume_saved_primary(root: Path, config_path: Path, config: dict) -> dict[str, Any]:
+    """Resume verification and pricing after a retained primary; never rerun the MILP."""
+    root = require_local_path(root, "repository")
+    config_path = require_local_path(config_path, "configuration")
+    result_directory = resolve_from(root, config["result_directory"], "result directory")
+    lock_path = resolve_from(root, config["run_lock"], "official-run lock")
+    checkpoint_path = require_local_path(
+        result_directory / "primary-checkpoint.json", "primary checkpoint"
+    )
+    result_path = require_local_path(result_directory / "result.json", "official result")
+    if not lock_path.exists() or not checkpoint_path.exists():
+        raise RuntimeError("A failed run lock and saved primary checkpoint are required to resume")
+    if result_path.exists():
+        raise RuntimeError(f"Refusing to replace existing official result at {result_path}")
+    if not git_is_clean(root):
+        raise RuntimeError("Post-processing resume requires a clean, frozen Git worktree")
+
+    lock = load_result(lock_path)
+    checkpoint = load_result(checkpoint_path)
+    if lock.get("status") not in {"failed", "failed_acceptance"}:
+        raise RuntimeError(f"Run lock status is not resumable: {lock.get('status')}")
+    config_hash = sha256_file(config_path)
+    if checkpoint["reproducibility"]["config_sha256"] != config_hash:
+        raise RuntimeError("Saved primary configuration hash does not match the registered file")
+    if checkpoint["reproducibility"]["git_commit"] != lock.get("git_commit"):
+        raise RuntimeError("Saved primary solve commit does not match the run lock")
+
+    postprocess_commit = git_commit(root)
+    original_elapsed = float(lock.get("elapsed_seconds", 0.0))
+    timings = dict(checkpoint["timings_seconds"])
+    monitor = PeakMemoryMonitor()
+    monitor.start()
+    resume_start = monotonic_seconds()
+    lock.update(
+        {
+            "status": "resuming_postprocess",
+            "postprocess_git_commit": postprocess_commit,
+            "resume_started_utc": _utc_now(),
+            "primary_rerun": False,
+        }
+    )
+    write_json(lock_path, lock)
+    try:
+        step = monotonic_seconds()
+        case = read_case(root, config)
+        timings["resume_source_ingest"] = monotonic_seconds() - step
+
+        step = monotonic_seconds()
+        model = build_extensive_model(case, config)
+        timings["resume_model_build"] = monotonic_seconds() - step
+
+        step = monotonic_seconds()
+        primary_checker = verify_primary_checkpoint(root, config, checkpoint_path, config_path)
+        timings["independent_primary_verification"] = monotonic_seconds() - step
+        if primary_checker["status"] != "pass":
+            lock["status"] = "failed_acceptance"
+            lock["primary_checker"] = primary_checker["status"]
+            write_json(lock_path, lock)
+            raise RuntimeError(f"Primary solution failed independent acceptance: {primary_checker}")
+
+        checkpoint = load_result(checkpoint_path)
+        checkpoint["timings_seconds"] = dict(timings)
+        checkpoint["peak_rss_bytes"] = max(
+            int(checkpoint.get("peak_rss_bytes", 0)), monitor.peak_rss_bytes
+        )
+        save_result(checkpoint_path, checkpoint)
+        primary_path = require_local_path(root / checkpoint["artifact"]["path"], "primary primal")
+        primary_arrays = read_npz(primary_path)
+        primary = primary_result_from_checkpoint(model, checkpoint, primary_arrays)
+        lock.update({"status": "primary_verified", "primary_checker": "pass"})
+        write_json(lock_path, lock)
+
+        step = monotonic_seconds()
+        pricing = solve_pricing_lp(model, config, primary.column_values)
+        timings["pricing_lp"] = monotonic_seconds() - step
+
+        step = monotonic_seconds()
+        pricing_path = require_local_path(result_directory / "pricing-primal.npz", "pricing primal")
+        pricing_hash = write_npz(pricing_path, physical_arrays(model, pricing.column_values))
+        checkpoint_hash = sha256_file(checkpoint_path)
+        payload = build_result_payload(
+            model,
+            config,
+            config_hash,
+            str(checkpoint["reproducibility"]["git_commit"]),
+            primary,
+            pricing,
+            _artifact(root, primary_path, str(checkpoint["artifact"]["sha256"])),
+            _artifact(root, checkpoint_path, checkpoint_hash),
+            _artifact(root, pricing_path, pricing_hash),
+            timings,
+            max(int(checkpoint.get("peak_rss_bytes", 0)), monitor.peak_rss_bytes),
+            postprocess_commit=postprocess_commit,
+        )
+        save_result(result_path, payload)
+        timings["resume_serialization"] = monotonic_seconds() - step
+
+        step = monotonic_seconds()
+        checker = verify_result(root, config, result_path, config_path)
+        timings["independent_verification"] = monotonic_seconds() - step
+        resume_elapsed = monotonic_seconds() - resume_start
+        timings["resume_active"] = resume_elapsed
+        timings["end_to_end_active"] = original_elapsed + resume_elapsed
+        peak = max(int(checkpoint.get("peak_rss_bytes", 0)), monitor.stop())
+        payload = load_result(result_path)
+        payload["timings_seconds"] = timings
+        payload["peak_rss_bytes"] = peak
+        payload["official_run"] = {
+            "status": "success" if checker["status"] == "pass" else "failed_acceptance",
+            "started_utc": lock["started_utc"],
+            "completed_utc": _utc_now(),
+            "cold_start": True,
+            "repeat_count": 1,
+            "resumed_from_saved_primary": True,
+            "primary_rerun": False,
+        }
+        save_result(result_path, payload)
+        lock.update(
+            {
+                "status": payload["official_run"]["status"],
+                "completed_utc": payload["official_run"]["completed_utc"],
+                "result": result_path.relative_to(root).as_posix(),
+                "checker": checker["status"],
+                "elapsed_seconds": timings["end_to_end_active"],
+            }
+        )
+        write_json(lock_path, lock)
+        if checker["status"] != "pass":
+            raise RuntimeError(f"Official run failed independent acceptance: {checker}")
+        return payload
+    except BaseException as exc:
+        peak = max(int(checkpoint.get("peak_rss_bytes", 0)), monitor.stop())
+        failure_status = lock["status"] if lock.get("status") == "failed_acceptance" else "failed"
+        lock.update(
+            {
+                "status": failure_status,
+                "completed_utc": _utc_now(),
+                "peak_rss_bytes": peak,
+                "elapsed_seconds": original_elapsed + monotonic_seconds() - resume_start,
                 "error_type": type(exc).__name__,
                 "error": str(exc),
                 "traceback": traceback.format_exc(),

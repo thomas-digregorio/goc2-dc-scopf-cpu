@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, replace
+from pathlib import Path
 
 import numpy as np
 import pytest
+from jsonschema import Draft202012Validator
 
 from goc2_dc_scopf.checker import _check_physical, _check_primary_solution, _objective
 from goc2_dc_scopf.highs import solve_pricing_lp, solve_primary_milp
@@ -12,6 +15,7 @@ from goc2_dc_scopf.results import (
     build_primary_checkpoint,
     build_result_payload,
     physical_arrays,
+    primary_result_from_checkpoint,
 )
 
 
@@ -56,15 +60,27 @@ def test_tiny_primary_milp_and_pricing(tiny_case, tiny_config) -> None:
         "config-hash",
         "commit",
         primary,
-        {"path": "primary-primal.npz", "sha256": "artifact-hash", "bytes": 1},
+        {"path": "primary-primal.npz", "sha256": "0" * 64, "bytes": 1},
         {"primary_milp": primary.primary.wall_seconds},
         1,
     )
     assert checkpoint["status"] == "primary_solved"
     assert checkpoint["run"] == {"cold_start": True, "initial_solution": "none"}
     assert "secondary" not in checkpoint["solver"]
+    checkpoint["profile"] = "GOC2-DC-D1-CORRECTIVE-v2"
+    checkpoint_schema = json.loads(
+        (Path(__file__).parents[1] / "schemas" / "primary-checkpoint.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    Draft202012Validator(checkpoint_schema).validate(checkpoint)
 
-    artifact = {"path": "artifact", "sha256": "hash", "bytes": 1}
+    restored = primary_result_from_checkpoint(model, checkpoint, arrays)
+    restored_arrays = physical_arrays(model, restored.column_values)
+    for name, values in arrays.items():
+        assert np.array_equal(restored_arrays[name], values)
+
+    artifact = {"path": "artifact", "sha256": "0" * 64, "bytes": 1}
     payload = build_result_payload(
         model,
         tiny_config,
@@ -82,6 +98,12 @@ def test_tiny_primary_milp_and_pricing(tiny_case, tiny_config) -> None:
     assert payload["objectives"]["primary_usd"] == pytest.approx(primary.objective)
     assert "secondary" not in payload["solver"]
     assert "secondary" not in payload["objectives"]
+    payload["profile"] = "GOC2-DC-D1-CORRECTIVE-v2"
+    payload["contingencies"] = [{} for _ in range(815)]
+    result_schema = json.loads(
+        (Path(__file__).parents[1] / "schemas" / "result.schema.json").read_text(encoding="utf-8")
+    )
+    Draft202012Validator(result_schema).validate(payload)
 
 
 def test_primary_model_has_no_corrective_movement_auxiliaries(tiny_case, tiny_config) -> None:

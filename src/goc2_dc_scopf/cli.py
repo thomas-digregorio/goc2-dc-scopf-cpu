@@ -7,7 +7,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-from .benchmark import run_official_benchmark
+from .benchmark import resume_saved_primary, run_official_benchmark
 from .checker import verify_primary_checkpoint, verify_result
 from .highs import validate_model_translation
 from .model import build_extensive_model, estimate_extensive_size
@@ -34,6 +34,10 @@ def _arguments() -> argparse.Namespace:
         help="pass the constructed model to HiGHS without solving",
     )
     subparsers.add_parser("benchmark", help="perform one cold official benchmark run")
+    subparsers.add_parser(
+        "resume",
+        help="resume verification and pricing from a retained primary without rerunning the MILP",
+    )
     verify_primary = subparsers.add_parser(
         "verify-primary", help="independently reverify a saved primary checkpoint"
     )
@@ -73,6 +77,15 @@ def main() -> None:
         print(
             json.dumps(
                 {"official_run": payload["official_run"], "checker": payload["checker"]}, indent=2
+            )
+        )
+        return
+    if args.command == "resume":
+        payload = resume_saved_primary(root, config_path, config)
+        print(
+            json.dumps(
+                {"official_run": payload["official_run"], "checker": payload["checker"]},
+                indent=2,
             )
         )
         return

@@ -49,6 +49,9 @@ pwsh scripts/fetch-617.ps1
 
 Development uses only tiny fixtures. After all preflight gates pass, each explicitly authorized
 `benchmark` invocation is cold and records a run lock so an accidental repetition is refused.
+If a post-primary serialization, verification, or pricing failure occurs, `resume` may continue
+from the hashed primary checkpoint; it refuses to rerun the MILP and records the separate
+post-processing commit.
 
 ## Attribution
 

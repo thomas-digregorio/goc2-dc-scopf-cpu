@@ -40,11 +40,21 @@
     "objectives": {
       "type": "object",
       "required": ["primary_usd", "primary_dual_bound_usd", "primary_mip_gap"],
+      "properties": {
+        "primary_usd": {"type": "number"},
+        "primary_dual_bound_usd": {"type": "number"},
+        "primary_mip_gap": {"type": "number", "minimum": 0}
+      },
       "additionalProperties": false
     },
     "artifact": {
       "type": "object",
       "required": ["path", "sha256", "bytes"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "bytes": {"type": "integer", "minimum": 1}
+      },
       "additionalProperties": false
     },
     "checker": {

@@ -11,7 +11,7 @@ import highspy
 import numpy as np
 import psutil
 
-from .highs import PricingResult, PrimaryResult
+from .highs import PricingResult, PrimaryResult, StageSummary
 from .model import CanonicalModel
 from .paths import require_local_path, sha256_file, write_json
 
@@ -75,6 +75,26 @@ def read_npz(path: Path) -> dict[str, np.ndarray]:
     path = require_local_path(path, "result array")
     with np.load(path, allow_pickle=False) as archive:
         return {name: archive[name] for name in archive.files}
+
+
+def primary_result_from_checkpoint(
+    model: CanonicalModel,
+    checkpoint: dict[str, Any],
+    arrays: dict[str, np.ndarray],
+) -> PrimaryResult:
+    """Rebuild state columns from a saved primal without reconstructing cost-segment columns."""
+    values = np.zeros(model.layout.num_columns, dtype=np.float64)
+    for state in model.layout.states:
+        k = state.state_index
+        values[state.theta_start : state.pg_start] = arrays["theta_rad"][k]
+        values[state.pg_start : state.load_start] = arrays["generation_pu"][k]
+        values[state.load_start : state.flow_start] = arrays["load_pu"][k]
+        values[state.flow_start : state.u_start] = arrays["flow_pu"][k]
+        values[state.u_start : state.startup_start] = arrays["commitment"][k]
+        values[state.startup_start : state.shutdown_start] = arrays["startup"][k]
+        values[state.shutdown_start : state.stop] = arrays["shutdown"][k]
+    stage = StageSummary(**checkpoint["solver"]["primary"])
+    return PrimaryResult(stage, float(checkpoint["objectives"]["primary_usd"]), values)
 
 
 def git_commit(root: Path) -> str:
@@ -150,6 +170,7 @@ def build_result_payload(
     pricing_artifact: dict[str, Any],
     timings: dict[str, float],
     peak_rss_bytes: int,
+    postprocess_commit: str | None = None,
 ) -> dict[str, Any]:
     case = model.case
     primal = physical_arrays(model, primary.column_values)
@@ -238,7 +259,11 @@ def build_result_payload(
             "parser_commit": case.parser_commit,
             "untranslated": list(case.untranslated),
         },
-        "reproducibility": {"git_commit": commit, "config_sha256": config_sha256},
+        "reproducibility": {
+            "git_commit": commit,
+            "postprocess_git_commit": postprocess_commit or commit,
+            "config_sha256": config_sha256,
+        },
         "solver": {
             "name": "HiGHS",
             "version": highspy.Highs().version(),
