@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import itertools
 import math
 import sys
 from dataclasses import dataclass
@@ -81,6 +82,11 @@ class Branch:
     phase_shift_rad: float
     normal_limit_pu: float
     emergency_limit_pu: float
+    impedance_correction_factor: float = 1.0
+
+    @property
+    def dc_reactance_pu(self) -> float:
+        return self.reactance_pu * self.impedance_correction_factor
 
 
 @dataclass(frozen=True)
@@ -180,6 +186,29 @@ def _verify_source_files(source_directory: Path, manifest: dict[str, Any]) -> di
             raise ValueError(f"Byte-size mismatch for {path}")
         observed[filename] = actual
     return observed
+
+
+def _interpolate_impedance_correction(value: float, table: Any) -> float:
+    points = [
+        (float(position), float(factor))
+        for position, factor in zip(table.t, table.f, strict=True)
+        if position is not None and factor is not None
+    ]
+    if not points:
+        raise ValueError("Transformer impedance-correction table has no usable points")
+    if value <= points[0][0]:
+        factor = points[0][1]
+    elif value >= points[-1][0]:
+        factor = points[-1][1]
+    else:
+        factor = 1.0
+        for (left_x, left_y), (right_x, right_y) in itertools.pairwise(points):
+            if value < right_x:
+                factor = left_y + (value - left_x) * (right_y - left_y) / (right_x - left_x)
+                break
+    if factor <= 0.0 or not math.isfinite(factor):
+        raise ValueError(f"Invalid transformer impedance-correction factor {factor}")
+    return factor
 
 
 def read_case(root: Path, config: dict[str, Any]) -> CaseData:
@@ -306,6 +335,11 @@ def read_case(root: Path, config: dict[str, Any]) -> CaseData:
         tap = float(record.windv1) / float(record.windv2)
         if tap <= 0.0:
             raise ValueError(f"Nonpositive transformer tap for {key}")
+        correction_factor = 1.0
+        if int(record.tab1) > 0 and int(record.cod1) in (-3, -1, 1, 3):
+            table = raw.transformer_impedance_correction_tables[int(record.tab1)]
+            control_value = tap if int(record.cod1) in (-1, 1) else float(record.ang1)
+            correction_factor = _interpolate_impedance_correction(control_value, table)
         branch_map[key] = len(branches)
         branches.append(
             Branch(
@@ -319,6 +353,7 @@ def read_case(root: Path, config: dict[str, Any]) -> CaseData:
                 math.radians(float(record.ang1)),
                 float(record.rata1) / base_mva,
                 float(record.ratc1) / base_mva,
+                correction_factor,
             )
         )
 
@@ -437,6 +472,9 @@ def audit_case(case: CaseData) -> dict[str, Any]:
             "nonzero_phase_shifts": sum(abs(b.phase_shift_rad) > 1e-12 for b in case.branches),
             "emergency_limit_differs": sum(
                 abs(b.emergency_limit_pu - b.normal_limit_pu) > 1e-12 for b in case.branches
+            ),
+            "impedance_corrections_applied": sum(
+                abs(b.impedance_correction_factor - 1.0) > 1e-12 for b in case.branches
             ),
             "active_shunts": sum(abs(s.conductance_pu) > 1e-12 for s in case.fixed_shunts),
         },

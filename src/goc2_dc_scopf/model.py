@@ -353,7 +353,7 @@ def build_extensive_model(case: CaseData, config: dict) -> CanonicalModel:
         for branch_index, branch in enumerate(case.branches):
             if contingency is not None and contingency.branch_index == branch_index:
                 continue
-            susceptance = 1.0 / (branch.reactance_pu * branch.tap_magnitude)
+            susceptance = 1.0 / (branch.dc_reactance_pu * branch.tap_magnitude)
             rhs = -susceptance * branch.phase_shift_rad
             rows.add(
                 (state.flow(branch_index), state.theta(branch.from_bus_index), state.theta(branch.to_bus_index)),

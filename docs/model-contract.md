@@ -25,6 +25,9 @@ within the exact `tmin * PL` and `tmax * PL` domain and the source active-power 
 There is no involuntary load-shedding variable.
 
 The lossless DC branch equations use source reactance, fixed tap magnitude, and fixed phase shift.
+Where the source activates a transformer impedance-correction table, its factor is interpolated at
+that frozen tap/phase operating point and retained explicitly; the DC series reactance is source
+X12 multiplied by that factor, consistent with the source evaluator's admittance convention.
 Active fixed-shunt conductance is represented at 1.0 p.u. voltage. Reactive quantities, voltage
 magnitudes, resistance losses, reactive shunts, AC recovery, and discretionary switching are
 excluded.
@@ -38,4 +41,3 @@ from official Challenge 2 scoring.
 After all binaries are fixed, the complete continuous formulation is resolved. Negative base
 balance-row duals, converted from interval dollars per p.u. to dollars per MWh, are reported as
 fixed-commitment, lossless-DC, security-constrained nodal prices.
-

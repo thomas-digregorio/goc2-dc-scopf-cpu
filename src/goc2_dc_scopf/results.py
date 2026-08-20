@@ -26,6 +26,11 @@ def _branch_identity(branch: Any) -> dict[str, int | str]:
         "to_bus": branch.key[1],
         "circuit": branch.key[2],
         "kind": branch.kind,
+        "source_reactance_pu": branch.reactance_pu,
+        "impedance_correction_factor": branch.impedance_correction_factor,
+        "dc_reactance_pu": branch.dc_reactance_pu,
+        "tap_magnitude": branch.tap_magnitude,
+        "phase_shift_rad": branch.phase_shift_rad,
     }
 
 

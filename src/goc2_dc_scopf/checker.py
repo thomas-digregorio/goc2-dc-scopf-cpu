@@ -189,7 +189,7 @@ def _check_physical(
                 theta[state, branch.from_bus_index]
                 - theta[state, branch.to_bus_index]
                 - branch.phase_shift_rad
-            ) / (branch.reactance_pu * branch.tap_magnitude)
+            ) / (branch.dc_reactance_pu * branch.tap_magnitude)
             residual = abs(flow[state, branch_index] - expected_flow)
             model.observe(residual, "DC branch equation", (state, branch.key))
             limit = branch.normal_limit_pu if state == 0 else branch.emergency_limit_pu
