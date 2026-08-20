@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 
 import highspy
 import numpy as np
 
+from .deadline import RunDeadlineExceeded
 from .model import CanonicalModel
 
 
@@ -34,6 +35,7 @@ class PrimaryResult:
     column_values: np.ndarray
     resident_highs: highspy.Highs | None = None
     resident_basis: highspy.HighsBasis | None = None
+    acceleration: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -99,7 +101,13 @@ def _set_option(highs: highspy.Highs, name: str, value: object) -> None:
         raise RuntimeError(f"HiGHS rejected option {name}={value!r}: {status}")
 
 
-def _configure(highs: highspy.Highs, solver_config: dict, *, mip: bool) -> None:
+def _configure(
+    highs: highspy.Highs,
+    solver_config: dict,
+    *,
+    mip: bool,
+    time_limit_override_seconds: float | None = None,
+) -> None:
     console = bool(solver_config.get("console_logging", True))
     _set_option(highs, "output_flag", console)
     _set_option(highs, "log_to_console", console)
@@ -124,6 +132,12 @@ def _configure(highs: highspy.Highs, solver_config: dict, *, mip: bool) -> None:
     threads = int(solver_config.get("threads", 0))
     _set_option(highs, "threads", threads)
     time_limit = solver_config.get("time_limit_seconds")
+    if time_limit_override_seconds is not None:
+        time_limit = (
+            time_limit_override_seconds
+            if time_limit is None
+            else min(float(time_limit), time_limit_override_seconds)
+        )
     if time_limit is not None:
         _set_option(highs, "time_limit", float(time_limit))
     if mip:
@@ -132,6 +146,8 @@ def _configure(highs: highspy.Highs, solver_config: dict, *, mip: bool) -> None:
         _set_option(highs, "mip_lp_solver", str(solver_config.get("mip_lp_solver", "simplex")))
     else:
         _set_option(highs, "solver", str(solver_config.get("pricing_lp_solver", "simplex")))
+    for option, value in solver_config.get("advanced_options", {}).items():
+        _set_option(highs, str(option), value)
 
 
 def _highs_model(
@@ -202,15 +218,56 @@ def _require_solution(stage: StageSummary, highs: highspy.Highs) -> np.ndarray:
     return values
 
 
-def solve_primary_milp(model: CanonicalModel, config: dict) -> PrimaryResult:
+def solve_primary_milp(
+    model: CanonicalModel,
+    config: dict,
+    *,
+    time_limit_seconds: float | None = None,
+    initial_solution: np.ndarray | None = None,
+) -> PrimaryResult:
     solver_config = config["solver"]
     highs = highspy.Highs()
-    _configure(highs, solver_config, mip=True)
+    _configure(
+        highs,
+        solver_config,
+        mip=True,
+        time_limit_override_seconds=time_limit_seconds,
+    )
     _pass_model(highs, _highs_model(model, model.primary_cost, relax_integrality=False))
+
+    start_summary: dict[str, object] = {
+        "attempted": initial_solution is not None,
+        "accepted": False,
+        "column_count": 0,
+        "status": None,
+    }
+    if initial_solution is not None:
+        values = np.asarray(initial_solution, dtype=np.float64)
+        if values.shape != (model.layout.num_columns,) or not np.all(np.isfinite(values)):
+            raise ValueError("Primary MIP start must be one finite value per canonical column")
+        columns = np.arange(model.layout.num_columns, dtype=np.int32)
+        start_status = highs.setSolution(columns.size, columns, values)
+        start_summary.update(
+            {
+                "accepted": start_status == highspy.HighsStatus.kOk,
+                "column_count": int(columns.size),
+                "status": str(start_status),
+            }
+        )
+        if start_status != highspy.HighsStatus.kOk:
+            raise RuntimeError(f"HiGHS rejected internally generated primary MIP start: {start_status}")
+        if bool(solver_config.get("console_logging", True)):
+            print(f"Primary MIP-start acceptance: {json.dumps(start_summary, sort_keys=True)}")
 
     start = time.perf_counter()
     status = highs.run()
     primary_stage = _stage_summary("primary_milp", highs, status, time.perf_counter() - start)
+    if highs.getModelStatus() == highspy.HighsModelStatus.kTimeLimit:
+        raise RunDeadlineExceeded(
+            f"Primary MILP reached its registered stage limit after "
+            f"{primary_stage.wall_seconds:.3f}s",
+            details={"solver_stage": asdict(primary_stage)},
+        )
     primary_values = _require_solution(primary_stage, highs)
     primary_objective = float(np.dot(model.primary_cost, primary_values))
     target_gap = float(solver_config["mip_relative_gap"])
@@ -225,10 +282,23 @@ def solve_primary_milp(model: CanonicalModel, config: dict) -> PrimaryResult:
     retain_resident = bool(solver_config.get("pricing_hot_start_required", False))
     basis = highs.getBasis() if retain_resident else None
     resident = highs if retain_resident else None
-    return PrimaryResult(primary_stage, primary_objective, primary_values, resident, basis)
+    return PrimaryResult(
+        primary_stage,
+        primary_objective,
+        primary_values,
+        resident,
+        basis,
+        {"mip_start": start_summary},
+    )
 
 
-def solve_pricing_lp(model: CanonicalModel, config: dict, primary: PrimaryResult) -> PricingResult:
+def solve_pricing_lp(
+    model: CanonicalModel,
+    config: dict,
+    primary: PrimaryResult,
+    *,
+    time_limit_seconds: float | None = None,
+) -> PricingResult:
     solver_config = config["solver"]
     hot_start_required = bool(solver_config.get("pricing_hot_start_required", False))
     milp_values = primary.column_values
@@ -259,7 +329,12 @@ def solve_pricing_lp(model: CanonicalModel, config: dict, primary: PrimaryResult
             or translated.num_row_ != model.rows.num_rows
         ):
             raise RuntimeError("Resident HiGHS model dimensions changed after the primary solve")
-        _configure(highs, solver_config, mip=False)
+        _configure(
+            highs,
+            solver_config,
+            mip=False,
+            time_limit_override_seconds=time_limit_seconds,
+        )
         fixed_status = _require_ok(
             "fixed-commitment bound update",
             highs.changeColsBounds(fixed.size, fixed, fixed_values, fixed_values),
@@ -315,7 +390,12 @@ def solve_pricing_lp(model: CanonicalModel, config: dict, primary: PrimaryResult
             column_upper=column_upper,
         )
         highs = highspy.Highs()
-        _configure(highs, solver_config, mip=False)
+        _configure(
+            highs,
+            solver_config,
+            mip=False,
+            time_limit_override_seconds=time_limit_seconds,
+        )
         _pass_model(highs, lp)
         fixed_status = "applied_while_building_fresh_lp"
         integrality_status = "applied_while_building_fresh_lp"
@@ -351,6 +431,11 @@ def solve_pricing_lp(model: CanonicalModel, config: dict, primary: PrimaryResult
     stage = _stage_summary(
         "fixed_commitment_pricing_lp", highs, status, time.perf_counter() - start
     )
+    if highs.getModelStatus() == highspy.HighsModelStatus.kTimeLimit:
+        raise RunDeadlineExceeded(
+            f"Pricing LP reached its registered stage limit after {stage.wall_seconds:.3f}s",
+            details={"solver_stage": asdict(stage)},
+        )
     values = _require_solution(stage, highs)
     if highs.getModelStatus() != highspy.HighsModelStatus.kOptimal:
         raise RuntimeError(f"Pricing LP is not optimal: {stage.model_status}")

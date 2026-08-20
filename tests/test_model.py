@@ -10,7 +10,13 @@ import numpy as np
 import pytest
 from jsonschema import Draft202012Validator
 
+from goc2_dc_scopf.ablation import (
+    generate_internal_incumbent,
+    solve_decomposed_primary,
+    validate_cell,
+)
 from goc2_dc_scopf.checker import _check_physical, _check_primary_solution, _objective
+from goc2_dc_scopf.deadline import RunDeadline
 from goc2_dc_scopf.highs import solve_pricing_lp, solve_primary_milp
 from goc2_dc_scopf.model import build_extensive_model
 from goc2_dc_scopf.results import (
@@ -21,6 +27,30 @@ from goc2_dc_scopf.results import (
     pricing_arrays,
     primary_result_from_checkpoint,
 )
+
+
+def _ablation_config(config: dict, cell: str) -> dict:
+    result = deepcopy(config)
+    result["ablation"] = {
+        "cell": cell,
+        "decomposition": cell[0] == "1",
+        "internal_incumbent": cell[1] == "1",
+        "strong_valid_cuts": cell[2] == "1",
+        "solver_tuning": cell[3] == "1",
+        "incumbent_budget_seconds": 120,
+        "max_decomposition_rounds": 32,
+        "valid_cut_bus_count": 32,
+        "linear_algebra_threads": 1 if cell[3] == "1" else None,
+    }
+    result["solver"]["threads"] = 0
+    if cell[3] == "1":
+        result["solver"]["threads"] = 24
+        result["solver"]["advanced_options"] = {
+            "parallel": "on",
+            "simplex_strategy": 3,
+            "simplex_max_concurrency": 8,
+        }
+    return result
 
 
 def test_tiny_primary_milp_and_pricing(tiny_case, tiny_config) -> None:
@@ -142,6 +172,103 @@ def test_primary_model_has_no_corrective_movement_auxiliaries(tiny_case, tiny_co
     segment_columns += sum(len(x) for x in model.layout.load_segment_columns)
     assert model.layout.num_columns == state_columns + segment_columns
     assert not hasattr(model, "secondary_cost")
+
+
+def test_strong_valid_cuts_preserve_tiny_optimum(tiny_case, tiny_config) -> None:
+    default_model = build_extensive_model(tiny_case, tiny_config)
+    default = solve_primary_milp(default_model, tiny_config)
+    cut_config = _ablation_config(tiny_config, "0010")
+    cut_model = build_extensive_model(tiny_case, cut_config)
+    cut = solve_primary_milp(cut_model, cut_config)
+    assert cut_model.metadata.valid_inequality_rows
+    assert cut_model.rows.num_rows > default_model.rows.num_rows
+    assert cut.objective == pytest.approx(default.objective, abs=1e-8)
+    assert cut_model.maximum_valid_inequality_violation(cut.column_values) <= 1e-8
+    arrays = physical_arrays(cut_model, cut.column_values)
+    residual, security = _check_physical(tiny_case, arrays, fixed_commitment=None)
+    assert residual.maximum <= 1e-7
+    assert security.maximum <= 1e-7
+
+
+def test_exact_scenario_generation_matches_extensive_tiny(tiny_case, tiny_config) -> None:
+    config = _ablation_config(tiny_config, "1000")
+    full_model = build_extensive_model(tiny_case, config)
+    extensive = solve_primary_milp(full_model, config)
+    decomposed = solve_decomposed_primary(
+        tiny_case,
+        full_model,
+        config,
+        RunDeadline.start(30.0),
+        reserve_seconds=0.0,
+        initial_full_start=None,
+        incumbent_diagnostics=None,
+    )
+    assert decomposed.objective == pytest.approx(extensive.objective, abs=1e-8)
+    assert decomposed.primary.dual_bound <= decomposed.objective + 1e-8
+    assert decomposed.primary.mip_gap <= config["solver"]["mip_relative_gap"]
+    arrays = physical_arrays(full_model, decomposed.column_values)
+    residual, security = _check_physical(tiny_case, arrays, fixed_commitment=None)
+    assert residual.maximum <= 1e-7
+    assert security.maximum <= 1e-7
+    assert decomposed.acceleration["decomposition"]["final_exhaustive_screens"] == 2
+
+
+def test_source_only_internal_incumbent_is_complete_and_accepted(tiny_case, tiny_config) -> None:
+    config = _ablation_config(tiny_config, "0100")
+    full_model = build_extensive_model(tiny_case, config)
+    incumbent, diagnostics = generate_internal_incumbent(
+        tiny_case,
+        full_model,
+        config,
+        RunDeadline.start(30.0),
+        reserve_seconds=0.0,
+    )
+    assert incumbent is not None, diagnostics
+    assert incumbent.shape == (full_model.layout.num_columns,)
+    solved = solve_primary_milp(full_model, config, initial_solution=incumbent)
+    assert solved.acceleration["mip_start"]["accepted"]
+    arrays = physical_arrays(full_model, incumbent)
+    residual, security = _check_physical(tiny_case, arrays, fixed_commitment=None)
+    assert residual.maximum <= 1e-7
+    assert security.maximum <= 1e-7
+
+
+def test_factor_cell_validation(tiny_config) -> None:
+    validate_cell(_ablation_config(tiny_config, "0000"))
+    validate_cell(_ablation_config(tiny_config, "1111"))
+    invalid = _ablation_config(tiny_config, "1000")
+    invalid["ablation"]["cell"] = "0000"
+    with pytest.raises(ValueError, match="does not match"):
+        validate_cell(invalid)
+
+
+def test_zero_factor_model_is_byte_identical(tiny_case, tiny_config) -> None:
+    default = build_extensive_model(tiny_case, tiny_config)
+    zero = build_extensive_model(tiny_case, _ablation_config(tiny_config, "0000"))
+    assert default.statistics() == zero.statistics()
+    for default_buffer, zero_buffer in zip(
+        default.rows.numpy_buffers(), zero.rows.numpy_buffers(), strict=True
+    ):
+        assert np.array_equal(default_buffer, zero_buffer)
+    assert np.array_equal(default.column_lower, zero.column_lower)
+    assert np.array_equal(default.column_upper, zero.column_upper)
+    assert np.array_equal(default.primary_cost, zero.primary_cost)
+
+
+def test_registered_ablation_matrix_is_complete_and_valid() -> None:
+    root = Path(__file__).parents[1]
+    schema = json.loads((root / "schemas" / "config.schema.json").read_text(encoding="utf-8"))
+    paths = sorted((root / "configs" / "ablation").glob("*.json"))
+    expected = {f"{value:04b}" for value in range(1, 16)}
+    actual: set[str] = set()
+    for path in paths:
+        config = json.loads(path.read_text(encoding="utf-8"))
+        Draft202012Validator(schema).validate(config)
+        validate_cell(config)
+        actual.add(config["ablation"]["cell"])
+        assert config["run_budget"]["end_to_end_limit_seconds"] == 1800
+        assert config["solver"]["pricing_hot_start_required"] is False
+    assert actual == expected
 
 
 def test_hipo_root_and_required_resident_pricing_hot_start(tiny_case, tiny_config) -> None:

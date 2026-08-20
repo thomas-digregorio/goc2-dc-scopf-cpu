@@ -87,6 +87,7 @@ class ModelMetadata:
     base_balance_rows: tuple[int, ...]
     balance_row_starts: tuple[int, ...]
     primary_objective_name: str
+    valid_inequality_rows: tuple[int, ...] = ()
 
 
 class SparseRows:
@@ -158,6 +159,7 @@ class CanonicalModel:
             "integer_columns": int(self.integer_columns.size),
             "rows": self.rows.num_rows,
             "nonzeros": self.rows.num_nonzeros,
+            "valid_inequality_rows": len(self.metadata.valid_inequality_rows),
             "matrix_storage_bytes": (
                 len(self.rows.starts) * 8
                 + len(self.rows.indices) * 4
@@ -166,6 +168,18 @@ class CanonicalModel:
                 + len(self.rows.upper) * 8
             ),
         }
+
+    def maximum_valid_inequality_violation(self, values: np.ndarray) -> float:
+        if values.shape != (self.layout.num_columns,):
+            raise ValueError("Canonical value vector has the wrong width")
+        starts, indices, coefficients, lower, upper = self.rows.numpy_buffers()
+        maximum = 0.0
+        for row in self.metadata.valid_inequality_rows:
+            begin = int(starts[row])
+            end = int(starts[row + 1])
+            activity = float(np.dot(coefficients[begin:end], values[indices[begin:end]]))
+            maximum = max(maximum, float(lower[row]) - activity, activity - float(upper[row]))
+        return max(0.0, maximum)
 
 
 def _make_layout(case: CaseData) -> VariableLayout:
@@ -209,6 +223,151 @@ def estimate_extensive_size(case: CaseData) -> dict[str, int]:
         "integer_columns": case.states * ng,
         "estimated_rows_upper_bound": base_rows + contingency_rows + segment_rows,
     }
+
+
+def _add_valid_inequalities(
+    case: CaseData,
+    layout: VariableLayout,
+    rows: SparseRows,
+    *,
+    weakest_bus_count: int,
+) -> tuple[int, ...]:
+    """Add redundant capacity, ramp, and single-bus cut-set inequalities.
+
+    Every row is implied by existing nodal balances, branch bounds, generator
+    PMIN/PMAX, or generator ramp rows. They strengthen the LP representation
+    without changing the integer-feasible set.
+    """
+
+    bus_generators: list[list[int]] = [[] for _ in case.buses]
+    bus_loads: list[list[int]] = [[] for _ in case.buses]
+    bus_shunt = np.zeros(len(case.buses), dtype=np.float64)
+    for g, generator in enumerate(case.generators):
+        bus_generators[generator.bus_index].append(g)
+    for load_index, load in enumerate(case.loads):
+        bus_loads[load.bus_index].append(load_index)
+    for shunt in case.fixed_shunts:
+        bus_shunt[shunt.bus_index] += shunt.conductance_pu
+
+    added: list[int] = []
+    all_buses = tuple(range(len(case.buses)))
+
+    def add_cut_set(
+        state: StateLayout,
+        buses: Sequence[int],
+        capacity: float,
+    ) -> None:
+        generators = [g for bus in buses for g in bus_generators[bus]]
+        loads = [load for bus in buses for load in bus_loads[bus]]
+        shunt = float(sum(bus_shunt[bus] for bus in buses))
+        columns = [state.u(g) for g in generators] + [state.load(load) for load in loads]
+        lower_coefficients = [case.generators[g].pmax_pu for g in generators] + [
+            -1.0 for _ in loads
+        ]
+        upper_coefficients = [case.generators[g].pmin_pu for g in generators] + [
+            -1.0 for _ in loads
+        ]
+        added.append(
+            rows.add(columns, lower_coefficients, shunt - capacity, INF)
+        )
+        added.append(
+            rows.add(columns, upper_coefficients, -INF, shunt + capacity)
+        )
+
+    for state_index, state in enumerate(layout.states):
+        contingency = None if state_index == 0 else case.contingencies[state_index - 1]
+        add_cut_set(state, all_buses, 0.0)
+
+        incident_capacity = np.zeros(len(case.buses), dtype=np.float64)
+        for branch_index, branch in enumerate(case.branches):
+            if contingency is not None and contingency.branch_index == branch_index:
+                continue
+            limit = branch.normal_limit_pu if state_index == 0 else branch.emergency_limit_pu
+            incident_capacity[branch.from_bus_index] += limit
+            incident_capacity[branch.to_bus_index] += limit
+        candidates: list[tuple[float, int]] = []
+        for bus in range(len(case.buses)):
+            if not bus_generators[bus] and not bus_loads[bus]:
+                continue
+            activity = sum(
+                max(abs(case.generators[g].pmin_pu), abs(case.generators[g].pmax_pu))
+                for g in bus_generators[bus]
+            ) + sum(case.loads[load].pmax_pu for load in bus_loads[bus])
+            score = incident_capacity[bus] / max(activity, 1e-12)
+            candidates.append((score, bus))
+        for _, bus in sorted(candidates)[:weakest_bus_count]:
+            add_cut_set(state, (bus,), float(incident_capacity[bus]))
+
+        load_columns = [state.load(load) for load in range(len(case.loads))]
+        if state_index == 0:
+            upper_columns = list(load_columns)
+            upper_coefficients = [1.0] * len(load_columns)
+            lower_columns = list(load_columns)
+            lower_coefficients = [-1.0] * len(load_columns)
+            prior_sum = 0.0
+            for g, generator in enumerate(case.generators):
+                prior_sum += generator.prior_p_pu
+                upper_columns.extend((state.u(g), state.startup(g)))
+                upper_coefficients.extend(
+                    (
+                        -generator.ramp_up_base_pu_per_h * case.response_base_hours,
+                        -generator.pmin_pu,
+                    )
+                )
+                lower_columns.extend((state.u(g), state.shutdown(g)))
+                lower_coefficients.extend(
+                    (
+                        -generator.ramp_down_base_pu_per_h * case.response_base_hours,
+                        -generator.pmax_pu,
+                    )
+                )
+            total_shunt = float(np.sum(bus_shunt))
+            added.append(
+                rows.add(
+                    upper_columns,
+                    upper_coefficients,
+                    -INF,
+                    prior_sum - total_shunt,
+                )
+            )
+            added.append(
+                rows.add(
+                    lower_columns,
+                    lower_coefficients,
+                    -INF,
+                    total_shunt - prior_sum,
+                )
+            )
+        else:
+            base = layout.states[0]
+            upper_columns = list(load_columns)
+            upper_coefficients = [1.0] * len(load_columns)
+            lower_columns = list(load_columns)
+            lower_coefficients = [-1.0] * len(load_columns)
+            for g, generator in enumerate(case.generators):
+                if contingency is not None and contingency.generator_index == g:
+                    continue
+                upper_columns.extend((base.pg(g), state.u(g), state.startup(g)))
+                upper_coefficients.extend(
+                    (
+                        -1.0,
+                        -generator.ramp_up_ctg_pu_per_h * case.response_ctg_hours,
+                        -generator.pmin_pu,
+                    )
+                )
+                lower_columns.extend((base.pg(g), state.u(g), state.shutdown(g)))
+                lower_coefficients.extend(
+                    (
+                        1.0,
+                        -generator.ramp_down_ctg_pu_per_h * case.response_ctg_hours,
+                        -generator.pmax_pu,
+                    )
+                )
+            total_shunt = float(np.sum(bus_shunt))
+            added.append(rows.add(upper_columns, upper_coefficients, -INF, -total_shunt))
+            added.append(rows.add(lower_columns, lower_coefficients, -INF, total_shunt))
+
+    return tuple(added)
 
 
 def build_extensive_model(case: CaseData, config: dict) -> CanonicalModel:
@@ -429,6 +588,16 @@ def build_extensive_model(case: CaseData, config: dict) -> CanonicalModel:
     for load_index, columns in enumerate(layout.load_segment_columns):
         rows.add((base.load(load_index), *columns), (1.0, *(-1.0 for _ in columns)), 0.0, 0.0)
 
+    valid_inequality_rows: tuple[int, ...] = ()
+    ablation = config.get("ablation", {})
+    if bool(ablation.get("strong_valid_cuts", False)):
+        valid_inequality_rows = _add_valid_inequalities(
+            case,
+            layout,
+            rows,
+            weakest_bus_count=int(ablation.get("valid_cut_bus_count", 32)),
+        )
+
     return CanonicalModel(
         case,
         layout,
@@ -441,5 +610,6 @@ def build_extensive_model(case: CaseData, config: dict) -> CanonicalModel:
             tuple(base_balance_rows),
             tuple(balance_row_starts),
             "base_source_cost_minus_authorized_load_benefit",
+            valid_inequality_rows,
         ),
     )

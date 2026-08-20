@@ -107,7 +107,12 @@ def primary_result_from_checkpoint(
         values[state.startup_start : state.shutdown_start] = arrays["startup"][k]
         values[state.shutdown_start : state.stop] = arrays["shutdown"][k]
     stage = StageSummary(**checkpoint["solver"]["primary"])
-    return PrimaryResult(stage, float(checkpoint["objectives"]["primary_usd"]), values)
+    return PrimaryResult(
+        stage,
+        float(checkpoint["objectives"]["primary_usd"]),
+        values,
+        acceleration=dict(checkpoint["solver"].get("acceleration", {})),
+    )
 
 
 def git_commit(root: Path) -> str:
@@ -151,12 +156,20 @@ def build_primary_checkpoint(
             "untranslated": list(case.untranslated),
         },
         "reproducibility": {"git_commit": commit, "config_sha256": config_sha256},
-        "run": {"cold_start": True, "initial_solution": "none"},
+        "run": {
+            "cold_start": True,
+            "initial_solution": (
+                "internally_generated_from_source"
+                if primary.acceleration.get("mip_start", {}).get("attempted")
+                else "none"
+            ),
+        },
         "solver": {
             "name": "HiGHS",
             "version": highspy.Highs().version(),
             "configuration": config["solver"],
             "primary": asdict(primary.primary),
+            "acceleration": primary.acceleration,
         },
         "objectives": {
             "primary_usd": primary.objective,
@@ -282,6 +295,7 @@ def build_result_payload(
             "version": highspy.Highs().version(),
             "configuration": config["solver"],
             "primary": asdict(primary.primary),
+            "acceleration": primary.acceleration,
             "pricing": asdict(pricing.summary),
             "pricing_hot_start": asdict(pricing.hot_start),
         },

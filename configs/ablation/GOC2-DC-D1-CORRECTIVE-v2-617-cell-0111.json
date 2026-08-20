@@ -1,0 +1,52 @@
+{
+  "$schema": "../../schemas/config.schema.json",
+  "config_version": 2,
+  "profile": "GOC2-DC-D1-CORRECTIVE-v2",
+  "scenario": "C2S6N00617/scenario_001",
+  "source_directory": "data/raw/extracted/C2S6N00617/scenario_001",
+  "source_manifest": "docs/source-manifest.json",
+  "result_directory": "results/ablation-617/cell-0111",
+  "run_lock": "results/ablation-617/cell-0111/.official-run-started.json",
+  "run_budget": {
+    "end_to_end_limit_seconds": 1800,
+    "post_primary_reserve_seconds": 340,
+    "post_pricing_reserve_seconds": 15
+  },
+  "ablation": {
+    "cell": "0111",
+    "decomposition": false,
+    "internal_incumbent": true,
+    "strong_valid_cuts": true,
+    "solver_tuning": true,
+    "incumbent_budget_seconds": 120,
+    "max_decomposition_rounds": 32,
+    "valid_cut_bus_count": 32,
+    "linear_algebra_threads": 1
+  },
+  "solver": {
+    "name": "HiGHS",
+    "mip_relative_gap": 0.001,
+    "mip_absolute_gap": 0,
+    "mip_lp_solver": "simplex",
+    "pricing_lp_solver": "simplex",
+    "pricing_hot_start_required": false,
+    "time_limit_seconds": null,
+    "threads": 24,
+    "random_seed": 0,
+    "presolve": "on",
+    "primal_feasibility_tolerance": 1e-7,
+    "dual_feasibility_tolerance": 1e-7,
+    "mip_feasibility_tolerance": 0.000001,
+    "console_logging": true,
+    "advanced_options": {
+      "parallel": "on",
+      "simplex_strategy": 3,
+      "simplex_max_concurrency": 8
+    }
+  },
+  "numerics": {
+    "model_residual_tolerance_pu": 0.000001,
+    "security_violation_tolerance_pu": 0.00001,
+    "integrality_tolerance": 0.000001
+  }
+}

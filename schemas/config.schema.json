@@ -24,6 +24,46 @@
     "source_manifest": {"type": "string", "minLength": 1},
     "result_directory": {"type": "string", "minLength": 1},
     "run_lock": {"type": "string", "minLength": 1},
+    "run_budget": {
+      "type": "object",
+      "required": [
+        "end_to_end_limit_seconds",
+        "post_primary_reserve_seconds",
+        "post_pricing_reserve_seconds"
+      ],
+      "properties": {
+        "end_to_end_limit_seconds": {"const": 1800},
+        "post_primary_reserve_seconds": {"type": "number", "minimum": 0},
+        "post_pricing_reserve_seconds": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "ablation": {
+      "type": "object",
+      "required": [
+        "cell",
+        "decomposition",
+        "internal_incumbent",
+        "strong_valid_cuts",
+        "solver_tuning",
+        "incumbent_budget_seconds",
+        "max_decomposition_rounds",
+        "valid_cut_bus_count",
+        "linear_algebra_threads"
+      ],
+      "properties": {
+        "cell": {"type": "string", "pattern": "^[01]{4}$"},
+        "decomposition": {"type": "boolean"},
+        "internal_incumbent": {"type": "boolean"},
+        "strong_valid_cuts": {"type": "boolean"},
+        "solver_tuning": {"type": "boolean"},
+        "incumbent_budget_seconds": {"const": 120},
+        "max_decomposition_rounds": {"const": 32},
+        "valid_cut_bus_count": {"const": 32},
+        "linear_algebra_threads": {"type": ["integer", "null"], "minimum": 1}
+      },
+      "additionalProperties": false
+    },
     "solver": {
       "type": "object",
       "required": ["name", "mip_relative_gap", "threads", "random_seed", "presolve", "primal_feasibility_tolerance", "dual_feasibility_tolerance", "mip_feasibility_tolerance", "console_logging"],
@@ -41,7 +81,13 @@
         "primal_feasibility_tolerance": {"type": "number", "exclusiveMinimum": 0},
         "dual_feasibility_tolerance": {"type": "number", "exclusiveMinimum": 0},
         "mip_feasibility_tolerance": {"type": "number", "exclusiveMinimum": 0},
-        "console_logging": {"type": "boolean"}
+        "console_logging": {"type": "boolean"},
+        "advanced_options": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["string", "number", "integer", "boolean"]
+          }
+        }
       },
       "additionalProperties": false
     },

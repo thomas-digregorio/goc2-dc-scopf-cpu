@@ -27,7 +27,9 @@
       "required": ["cold_start", "initial_solution"],
       "properties": {
         "cold_start": {"const": true},
-        "initial_solution": {"const": "none"}
+        "initial_solution": {
+          "enum": ["none", "internally_generated_from_source"]
+        }
       },
       "additionalProperties": false
     },

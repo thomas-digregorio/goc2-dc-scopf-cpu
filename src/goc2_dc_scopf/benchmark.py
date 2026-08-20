@@ -8,7 +8,14 @@ from typing import Any
 
 import numpy as np
 
+from .ablation import (
+    factors,
+    generate_internal_incumbent,
+    solve_decomposed_primary,
+    validate_cell,
+)
 from .checker import verify_primary_checkpoint, verify_result
+from .deadline import RunDeadline, RunDeadlineExceeded
 from .highs import solve_pricing_lp, solve_primary_milp
 from .model import build_extensive_model
 from .monitor import PeakMemoryMonitor, monotonic_seconds
@@ -52,6 +59,7 @@ def run_official_benchmark(root: Path, config_path: Path, config: dict) -> dict[
         )
     if not git_is_clean(root):
         raise RuntimeError("Official benchmark requires a clean, frozen Git worktree")
+    validate_cell(config, check_environment=True)
     commit = git_commit(root)
     config_hash = sha256_file(config_path)
     result_directory.mkdir(parents=True, exist_ok=True)
@@ -66,21 +74,66 @@ def run_official_benchmark(root: Path, config_path: Path, config: dict) -> dict[
 
     monitor = PeakMemoryMonitor()
     monitor.start()
-    total_start = monotonic_seconds()
+    run_budget = config.get("run_budget", {})
+    run_limit = run_budget.get("end_to_end_limit_seconds")
+    deadline = RunDeadline.start(None if run_limit is None else float(run_limit))
+    total_start = deadline.started
     timings: dict[str, float] = {}
+    result_path: Path | None = None
     try:
         step = monotonic_seconds()
         case = read_case(root, config)
         timings["source_ingest"] = monotonic_seconds() - step
+        deadline.check("model build")
 
         step = monotonic_seconds()
         model = build_extensive_model(case, config)
         timings["model_build"] = monotonic_seconds() - step
+        deadline.check("primary solve")
 
         step = monotonic_seconds()
-        primary = solve_primary_milp(model, config)
+        post_primary_reserve = float(run_budget.get("post_primary_reserve_seconds", 0.0))
+        enabled = factors(config)
+        initial_solution = None
+        incumbent_diagnostics = None
+        if enabled["internal_incumbent"]:
+            incumbent_step = monotonic_seconds()
+            initial_solution, incumbent_diagnostics = generate_internal_incumbent(
+                case,
+                model,
+                config,
+                deadline,
+                reserve_seconds=post_primary_reserve,
+            )
+            timings["internal_incumbent"] = monotonic_seconds() - incumbent_step
+        if enabled["decomposition"]:
+            primary = solve_decomposed_primary(
+                case,
+                model,
+                config,
+                deadline,
+                reserve_seconds=post_primary_reserve,
+                initial_full_start=initial_solution,
+                incumbent_diagnostics=incumbent_diagnostics,
+            )
+        else:
+            primary = solve_primary_milp(
+                model,
+                config,
+                time_limit_seconds=deadline.solver_limit(
+                    "primary solve",
+                    reserve_seconds=post_primary_reserve,
+                ),
+                initial_solution=initial_solution,
+            )
+            if incumbent_diagnostics is not None:
+                primary.acceleration["internal_incumbent"] = incumbent_diagnostics
         timings["primary_milp_total"] = monotonic_seconds() - step
         timings["primary_milp"] = primary.primary.wall_seconds
+        deadline.check(
+            "primary checkpoint",
+            reserve_seconds=float(run_budget.get("post_primary_reserve_seconds", 0.0)),
+        )
 
         step = monotonic_seconds()
         primary_path = require_local_path(result_directory / "primary-primal.npz", "primary primal")
@@ -129,10 +182,23 @@ def run_official_benchmark(root: Path, config_path: Path, config: dict) -> dict[
             raise RuntimeError(f"Primary solution failed independent acceptance: {primary_checker}")
         lock["status"] = "primary_verified"
         write_json(lock_path, lock)
+        deadline.check(
+            "pricing solve",
+            reserve_seconds=float(run_budget.get("post_pricing_reserve_seconds", 0.0)),
+        )
 
         step = monotonic_seconds()
-        pricing = solve_pricing_lp(model, config, primary)
+        pricing = solve_pricing_lp(
+            model,
+            config,
+            primary,
+            time_limit_seconds=deadline.solver_limit(
+                "pricing solve",
+                reserve_seconds=float(run_budget.get("post_pricing_reserve_seconds", 0.0)),
+            ),
+        )
         timings["pricing_lp"] = monotonic_seconds() - step
+        deadline.check("result serialization")
 
         step = monotonic_seconds()
         pricing_path = require_local_path(result_directory / "pricing-primal.npz", "pricing primal")
@@ -160,6 +226,7 @@ def run_official_benchmark(root: Path, config_path: Path, config: dict) -> dict[
         checker = verify_result(root, config, result_path, config_path)
         timings["independent_verification"] = monotonic_seconds() - step
         timings["end_to_end"] = monotonic_seconds() - total_start
+        deadline.check("final result serialization")
         peak = monitor.stop()
         payload = load_result(result_path)
         payload["timings_seconds"] = timings
@@ -181,12 +248,18 @@ def run_official_benchmark(root: Path, config_path: Path, config: dict) -> dict[
             }
         )
         write_json(lock_path, lock)
+        deadline.check("completed run")
         if checker["status"] != "pass":
             raise RuntimeError(f"Official run failed independent acceptance: {checker}")
         return payload
     except BaseException as exc:
         peak = monitor.stop()
-        failure_status = lock["status"] if lock.get("status") == "failed_acceptance" else "failed"
+        if isinstance(exc, RunDeadlineExceeded):
+            failure_status = "timed_out"
+        else:
+            failure_status = (
+                lock["status"] if lock.get("status") == "failed_acceptance" else "failed"
+            )
         lock.update(
             {
                 "status": failure_status,
@@ -198,6 +271,14 @@ def run_official_benchmark(root: Path, config_path: Path, config: dict) -> dict[
                 "traceback": traceback.format_exc(),
             }
         )
+        if isinstance(exc, RunDeadlineExceeded):
+            lock["deadline_details"] = exc.details
+            if result_path is not None and result_path.exists():
+                partial = load_result(result_path)
+                if "official_run" in partial:
+                    partial["official_run"]["status"] = "timed_out"
+                    partial["official_run"]["completed_utc"] = lock["completed_utc"]
+                    save_result(result_path, partial)
         write_json(lock_path, lock)
         raise
 
