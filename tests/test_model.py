@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import asdict, replace
 from pathlib import Path
 
+import highspy
 import numpy as np
 import pytest
 from jsonschema import Draft202012Validator
@@ -144,6 +145,14 @@ def test_primary_model_has_no_corrective_movement_auxiliaries(tiny_case, tiny_co
 
 
 def test_hipo_root_and_required_resident_pricing_hot_start(tiny_case, tiny_config) -> None:
+    capability_probe = highspy.Highs()
+    capability_probe.setOptionValue("output_flag", False)
+    if (
+        capability_probe.setOptionValue("mip_lp_solver", "hipo")
+        != highspy.HighsStatus.kOk
+    ):
+        pytest.skip("installed HiGHS build does not provide the optional HiPO dependencies")
+
     config = deepcopy(tiny_config)
     config["solver"].update(
         {
