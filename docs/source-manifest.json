@@ -1,0 +1,37 @@
+{
+  "manifest_version": 1,
+  "profile": "GOC2-DC-D1-CORRECTIVE-v1",
+  "selection_frozen_utc": "2026-08-19T00:00:00Z",
+  "selection_rule": "Lexicographically first valid scenario directory in the pinned C2S6N00617 archive, chosen before optimization.",
+  "archive": {
+    "url": "https://data.openei.org/files/6197/Challenge_2_Sandbox_Data_C2S6N00617_Scenarios.zip",
+    "filename": "Challenge_2_Sandbox_Data_C2S6N00617_Scenarios.zip",
+    "sha256": "dbc25ca01a1691cc8e95b40652eb6d5c1480d483fbecb4e9b59af61e4510deea",
+    "content_length_bytes": 665396,
+    "last_modified": "Fri, 20 Sep 2024 21:01:49 GMT",
+    "etag": "\"a2734-62293590ac980\""
+  },
+  "scenario": {
+    "archive_directory": "C2S6N00617/scenario_001",
+    "files": {
+      "case.con": {
+        "bytes": 61995,
+        "sha256": "09bd85c1e71a713740abc925603d2b138a8cb6a5a5be046b1349d5ed0ff382bd"
+      },
+      "case.json": {
+        "bytes": 307403,
+        "sha256": "19bda25a8c14d7146d8680a0025a901a261827c06fdd6fb29c720f180558aa89"
+      },
+      "case.raw": {
+        "bytes": 187538,
+        "sha256": "ab7d2b87c9e34d070098bf9e578554646a3aca81e3dc86c717c5efa3f35120a9"
+      }
+    }
+  },
+  "parser": {
+    "repository": "https://github.com/GOCompetition/C2DataUtilities.git",
+    "commit": "9a61ac1c84cab527e2f3ab85cbd4a09dea3972db",
+    "license": "public domain"
+  }
+}
+

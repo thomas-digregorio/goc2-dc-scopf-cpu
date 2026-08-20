@@ -1,0 +1,3 @@
+[submodule "vendor/C2DataUtilities"]
+	path = vendor/C2DataUtilities
+	url = https://github.com/GOCompetition/C2DataUtilities.git

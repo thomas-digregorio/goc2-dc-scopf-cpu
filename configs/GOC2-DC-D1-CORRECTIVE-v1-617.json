@@ -1,0 +1,32 @@
+{
+  "config_version": 1,
+  "profile": "GOC2-DC-D1-CORRECTIVE-v1",
+  "scenario": "C2S6N00617/scenario_001",
+  "source_directory": "data/raw/extracted/C2S6N00617/scenario_001",
+  "source_manifest": "docs/source-manifest.json",
+  "result_directory": "results/official-617",
+  "run_lock": "results/official-617/.official-run-started.json",
+  "solver": {
+    "name": "HiGHS",
+    "mip_relative_gap": 0.001,
+    "mip_absolute_gap": 0.0,
+    "time_limit_seconds": null,
+    "threads": 0,
+    "random_seed": 0,
+    "presolve": "on",
+    "console_logging": true
+  },
+  "numerics": {
+    "model_residual_tolerance_pu": 1e-6,
+    "security_violation_tolerance_pu": 1e-5,
+    "integrality_tolerance": 1e-6,
+    "primary_lexicographic_cap_usd": 1e-6
+  },
+  "secondary_objective": {
+    "contingency_start_weight": 1.0,
+    "normalized_generation_movement_weight": 1.0,
+    "normalized_load_movement_weight": 1.0,
+    "normalization_floor_mw": 1.0
+  }
+}
+
