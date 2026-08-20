@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3,<9", "ruff>=0.9,<1"]
+hipo = ["highspy[extras]>=1.15,<2"]
 
 [project.scripts]
 goc2-dc-scopf = "goc2_dc_scopf.cli:main"

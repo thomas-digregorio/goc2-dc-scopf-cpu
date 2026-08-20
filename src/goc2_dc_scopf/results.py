@@ -283,6 +283,7 @@ def build_result_payload(
             "configuration": config["solver"],
             "primary": asdict(primary.primary),
             "pricing": asdict(pricing.summary),
+            "pricing_hot_start": asdict(pricing.hot_start),
         },
         "objectives": {
             "primary_usd": primary.objective,

@@ -131,7 +131,7 @@ def run_official_benchmark(root: Path, config_path: Path, config: dict) -> dict[
         write_json(lock_path, lock)
 
         step = monotonic_seconds()
-        pricing = solve_pricing_lp(model, config, primary.column_values)
+        pricing = solve_pricing_lp(model, config, primary)
         timings["pricing_lp"] = monotonic_seconds() - step
 
         step = monotonic_seconds()
@@ -275,7 +275,7 @@ def resume_saved_primary(root: Path, config_path: Path, config: dict) -> dict[st
         write_json(lock_path, lock)
 
         step = monotonic_seconds()
-        pricing = solve_pricing_lp(model, config, primary.column_values)
+        pricing = solve_pricing_lp(model, config, primary)
         timings["pricing_lp"] = monotonic_seconds() - step
 
         step = monotonic_seconds()

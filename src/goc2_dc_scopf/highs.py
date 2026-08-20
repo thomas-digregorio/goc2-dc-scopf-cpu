@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import time
 from dataclasses import dataclass
@@ -31,6 +32,31 @@ class PrimaryResult:
     primary: StageSummary
     objective: float
     column_values: np.ndarray
+    resident_highs: highspy.Highs | None = None
+    resident_basis: highspy.HighsBasis | None = None
+
+
+@dataclass(frozen=True)
+class PricingHotStartSummary:
+    required: bool
+    resident_model_reused: bool
+    fixed_column_count: int
+    fixed_bounds_status: str
+    relaxed_integer_column_count: int
+    relaxed_integrality_status: str
+    primary_basis_available: bool
+    basis_attempted: bool
+    basis_status: str | None
+    basis_accepted: bool
+    primal_start_attempted: bool
+    primal_start_column_count: int
+    primal_start_status: str | None
+    primal_start_accepted: bool
+    selected_method: str
+    pricing_solver: str
+    solution_value_valid_before_run: bool
+    basis_valid_before_run: bool
+    basis_valid_after_run: bool
 
 
 @dataclass
@@ -39,6 +65,7 @@ class PricingResult:
     objective: float
     column_values: np.ndarray
     base_balance_duals: np.ndarray
+    hot_start: PricingHotStartSummary
 
 
 def _finite(value: float) -> float | None:
@@ -102,6 +129,10 @@ def _configure(highs: highspy.Highs, solver_config: dict, *, mip: bool) -> None:
     if mip:
         _set_option(highs, "mip_rel_gap", float(solver_config["mip_relative_gap"]))
         _set_option(highs, "mip_abs_gap", float(solver_config.get("mip_absolute_gap", 0.0)))
+        if "mip_lp_solver" in solver_config:
+            _set_option(highs, "mip_lp_solver", str(solver_config["mip_lp_solver"]))
+    elif "pricing_lp_solver" in solver_config:
+        _set_option(highs, "solver", str(solver_config["pricing_lp_solver"]))
 
 
 def _highs_model(
@@ -139,6 +170,13 @@ def _pass_model(highs: highspy.Highs, lp: highspy.HighsLp) -> None:
     status = highs.passModel(lp)
     if status != highspy.HighsStatus.kOk:
         raise RuntimeError(f"HiGHS passModel failed: {status}")
+
+
+def _require_ok(operation: str, status: highspy.HighsStatus) -> str:
+    status_text = str(status)
+    if status != highspy.HighsStatus.kOk:
+        raise RuntimeError(f"HiGHS {operation} failed: {status_text}")
+    return status_text
 
 
 def validate_model_translation(model: CanonicalModel) -> dict[str, int]:
@@ -185,30 +223,128 @@ def solve_primary_milp(model: CanonicalModel, config: dict) -> PrimaryResult:
         raise RuntimeError(
             f"Primary MILP did not certify requested gap {target_gap}: {primary_stage.mip_gap}"
         )
-    return PrimaryResult(primary_stage, primary_objective, primary_values)
+    basis = highs.getBasis()
+    return PrimaryResult(primary_stage, primary_objective, primary_values, highs, basis)
 
 
-def solve_pricing_lp(model: CanonicalModel, config: dict, milp_values: np.ndarray) -> PricingResult:
+def solve_pricing_lp(model: CanonicalModel, config: dict, primary: PrimaryResult) -> PricingResult:
+    solver_config = config["solver"]
+    hot_start_required = bool(solver_config.get("pricing_hot_start_required", False))
+    milp_values = primary.column_values
     fixed_columns: list[int] = []
     for state in model.layout.states:
         fixed_columns.extend(range(state.u_start, state.stop))
     fixed = np.asarray(fixed_columns, dtype=np.int32)
     fixed_values = np.asarray(milp_values[fixed], dtype=np.float64)
-    column_lower = model.column_lower.copy()
-    column_upper = model.column_upper.copy()
-    column_lower[fixed] = fixed_values
-    column_upper[fixed] = fixed_values
-    lp = _highs_model(
-        model,
-        model.primary_cost,
-        relax_integrality=True,
-        column_lower=column_lower,
-        column_upper=column_upper,
+    integer_columns = np.asarray(model.integer_columns, dtype=np.int32)
+    continuous_types = np.full(
+        integer_columns.size, highspy.HighsVarType.kContinuous, dtype=np.uint8
     )
+    pricing_solver = str(solver_config.get("pricing_lp_solver", "choose"))
 
-    highs = highspy.Highs()
-    _configure(highs, config["solver"], mip=False)
-    _pass_model(highs, lp)
+    resident_model_reused = primary.resident_highs is not None
+    if hot_start_required and not resident_model_reused:
+        raise RuntimeError(
+            "Pricing hot start requires the resident verified primary HiGHS model; "
+            "checkpoint-only reconstruction is not sufficient"
+        )
+
+    if resident_model_reused:
+        highs = primary.resident_highs
+        assert highs is not None
+        translated = highs.getLp()
+        if (
+            translated.num_col_ != model.layout.num_columns
+            or translated.num_row_ != model.rows.num_rows
+        ):
+            raise RuntimeError("Resident HiGHS model dimensions changed after the primary solve")
+        _configure(highs, solver_config, mip=False)
+        fixed_status = _require_ok(
+            "fixed-commitment bound update",
+            highs.changeColsBounds(fixed.size, fixed, fixed_values, fixed_values),
+        )
+        integrality_status = _require_ok(
+            "integrality relaxation",
+            highs.changeColsIntegrality(integer_columns.size, integer_columns, continuous_types),
+        )
+
+        primary_basis = primary.resident_basis
+        primary_basis_available = bool(primary_basis is not None and primary_basis.valid)
+        basis_attempted = primary_basis_available
+        basis_status: str | None = None
+        basis_accepted = False
+        if primary_basis_available:
+            assert primary_basis is not None
+            raw_basis_status = highs.setBasis(primary_basis)
+            basis_status = str(raw_basis_status)
+            basis_accepted = bool(
+                raw_basis_status == highspy.HighsStatus.kOk and highs.getBasis().valid
+            )
+
+        primal_start_attempted = not basis_accepted
+        primal_start_status: str | None = None
+        primal_start_accepted = False
+        if primal_start_attempted:
+            all_columns = np.arange(model.layout.num_columns, dtype=np.int32)
+            raw_start_status = highs.setSolution(
+                all_columns.size, all_columns, np.asarray(milp_values, dtype=np.float64)
+            )
+            primal_start_status = str(raw_start_status)
+            primal_start_accepted = bool(
+                raw_start_status == highspy.HighsStatus.kOk and highs.getSolution().value_valid
+            )
+        if not basis_accepted and not primal_start_accepted:
+            raise RuntimeError(
+                "HiGHS accepted neither the resident primary basis nor the complete "
+                "verified-primary primal start for pricing"
+            )
+        selected_method = "resident_basis" if basis_accepted else "complete_primary_primal"
+        solution_value_valid_before_run = bool(highs.getSolution().value_valid)
+        basis_valid_before_run = bool(highs.getBasis().valid)
+    else:
+        column_lower = model.column_lower.copy()
+        column_upper = model.column_upper.copy()
+        column_lower[fixed] = fixed_values
+        column_upper[fixed] = fixed_values
+        lp = _highs_model(
+            model,
+            model.primary_cost,
+            relax_integrality=True,
+            column_lower=column_lower,
+            column_upper=column_upper,
+        )
+        highs = highspy.Highs()
+        _configure(highs, solver_config, mip=False)
+        _pass_model(highs, lp)
+        fixed_status = "applied_while_building_fresh_lp"
+        integrality_status = "applied_while_building_fresh_lp"
+        primary_basis_available = False
+        basis_attempted = False
+        basis_status = None
+        basis_accepted = False
+        primal_start_attempted = False
+        primal_start_status = None
+        primal_start_accepted = False
+        selected_method = "none_checkpoint_resume"
+        solution_value_valid_before_run = bool(highs.getSolution().value_valid)
+        basis_valid_before_run = bool(highs.getBasis().valid)
+
+    if bool(solver_config.get("console_logging", True)):
+        acceptance_log = {
+            "basis_accepted": basis_accepted,
+            "basis_attempted": basis_attempted,
+            "basis_status": basis_status,
+            "primal_start_accepted": primal_start_accepted,
+            "primal_start_attempted": primal_start_attempted,
+            "primal_start_status": primal_start_status,
+            "resident_model_reused": resident_model_reused,
+            "selected_method": selected_method,
+        }
+        print(
+            f"Pricing hot-start pre-run acceptance: {json.dumps(acceptance_log, sort_keys=True)}",
+            flush=True,
+        )
+
     start = time.perf_counter()
     status = highs.run()
     stage = _stage_summary(
@@ -219,4 +355,33 @@ def solve_pricing_lp(model: CanonicalModel, config: dict, milp_values: np.ndarra
         raise RuntimeError(f"Pricing LP is not optimal: {stage.model_status}")
     row_duals = np.asarray(highs.getSolution().row_dual, dtype=np.float64)
     base_duals = row_duals[np.asarray(model.metadata.base_balance_rows, dtype=np.int64)]
-    return PricingResult(stage, float(np.dot(model.primary_cost, values)), values, base_duals)
+    hot_start = PricingHotStartSummary(
+        required=hot_start_required,
+        resident_model_reused=resident_model_reused,
+        fixed_column_count=int(fixed.size),
+        fixed_bounds_status=fixed_status,
+        relaxed_integer_column_count=int(integer_columns.size),
+        relaxed_integrality_status=integrality_status,
+        primary_basis_available=primary_basis_available,
+        basis_attempted=basis_attempted,
+        basis_status=basis_status,
+        basis_accepted=basis_accepted,
+        primal_start_attempted=primal_start_attempted,
+        primal_start_column_count=(model.layout.num_columns if primal_start_attempted else 0),
+        primal_start_status=primal_start_status,
+        primal_start_accepted=primal_start_accepted,
+        selected_method=selected_method,
+        pricing_solver=pricing_solver,
+        solution_value_valid_before_run=solution_value_valid_before_run,
+        basis_valid_before_run=basis_valid_before_run,
+        basis_valid_after_run=bool(highs.getBasis().valid),
+    )
+    if bool(solver_config.get("console_logging", True)):
+        print(f"Pricing hot-start acceptance: {json.dumps(hot_start.__dict__, sort_keys=True)}")
+    return PricingResult(
+        stage,
+        float(np.dot(model.primary_cost, values)),
+        values,
+        base_duals,
+        hot_start,
+    )

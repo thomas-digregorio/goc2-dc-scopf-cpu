@@ -59,5 +59,7 @@ post-processing commit.
 The benchmark is derived from public ARPA-E Grid Optimization Competition Challenge 2 data.
 Parsing uses the public-domain
 [GOCompetition/C2DataUtilities](https://github.com/GOCompetition/C2DataUtilities) repository,
-pinned as a Git submodule. HiGHS and the Python dependencies retain their own licenses. No project
-license is granted by this repository at this time.
+pinned as a Git submodule. HiGHS and the Python dependencies retain their own licenses. The
+optional `highspy[extras]` installation supplies HiPO's AMD, BLAS, METIS, and RCM dependencies and
+is Apache-2.0 licensed; the base `highspy` package is MIT licensed. No project license is granted by
+this repository at this time.

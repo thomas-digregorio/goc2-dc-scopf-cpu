@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -24,7 +25,7 @@ from goc2_dc_scopf.results import (
 def test_tiny_primary_milp_and_pricing(tiny_case, tiny_config) -> None:
     model = build_extensive_model(tiny_case, tiny_config)
     primary = solve_primary_milp(model, tiny_config)
-    pricing = solve_pricing_lp(model, tiny_config, primary.column_values)
+    pricing = solve_pricing_lp(model, tiny_config, primary)
     arrays = physical_arrays(model, primary.column_values)
     pricing_primal = physical_arrays(model, pricing.column_values)
     violation, security = _check_physical(tiny_case, arrays, fixed_commitment=None)
@@ -45,6 +46,10 @@ def test_tiny_primary_milp_and_pricing(tiny_case, tiny_config) -> None:
     assert retained_pricing["base_balance_duals"].tolist() == pytest.approx(
         pricing.base_balance_duals.tolist()
     )
+    assert pricing.hot_start.resident_model_reused
+    assert pricing.hot_start.selected_method in {"resident_basis", "complete_primary_primal"}
+    assert pricing.hot_start.basis_accepted or pricing.hot_start.primal_start_accepted
+    assert pricing.hot_start.basis_valid_after_run
 
     commitment = np.rint(arrays["commitment"]).astype(int)
     assert commitment[0].tolist() == [1, 0]
@@ -107,6 +112,7 @@ def test_tiny_primary_milp_and_pricing(tiny_case, tiny_config) -> None:
     assert payload["result_version"] == 2
     assert payload["objectives"]["primary_usd"] == pytest.approx(primary.objective)
     assert "secondary" not in payload["solver"]
+    assert payload["solver"]["pricing_hot_start"] == asdict(pricing.hot_start)
     assert "secondary" not in payload["objectives"]
     assert [record["price"] for record in payload["pricing"]["base_usd_per_mwh"]] == pytest.approx(
         [10.0, 10.0, 10.0]
@@ -127,6 +133,29 @@ def test_primary_model_has_no_corrective_movement_auxiliaries(tiny_case, tiny_co
     segment_columns += sum(len(x) for x in model.layout.load_segment_columns)
     assert model.layout.num_columns == state_columns + segment_columns
     assert not hasattr(model, "secondary_cost")
+
+
+def test_hipo_root_and_required_resident_pricing_hot_start(tiny_case, tiny_config) -> None:
+    config = deepcopy(tiny_config)
+    config["solver"].update(
+        {
+            "mip_lp_solver": "hipo",
+            "pricing_lp_solver": "simplex",
+            "pricing_hot_start_required": True,
+        }
+    )
+    model = build_extensive_model(tiny_case, config)
+    primary = solve_primary_milp(model, config)
+    option_status, option_value = primary.resident_highs.getOptionValue("mip_lp_solver")
+    assert str(option_status) == "HighsStatus.kOk"
+    assert option_value == "hipo"
+
+    pricing = solve_pricing_lp(model, config, primary)
+    assert pricing.hot_start.required
+    assert pricing.hot_start.resident_model_reused
+    assert pricing.hot_start.pricing_solver == "simplex"
+    assert pricing.hot_start.basis_accepted or pricing.hot_start.primal_start_accepted
+    assert pricing.hot_start.selected_method != "none_checkpoint_resume"
 
 
 def test_exact_pmin_is_active(tiny_case, tiny_config) -> None:
