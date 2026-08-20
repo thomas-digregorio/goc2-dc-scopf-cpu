@@ -189,7 +189,12 @@ def read_case(root: Path, config: dict[str, Any]) -> CaseData:
     manifest = load_json(manifest_path)
     hashes = _verify_source_files(source_directory, manifest)
     _install_parser_path(root)
-    from data_utilities.data import Data  # type: ignore[import-not-found]
+    previous_bytecode_setting = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        from data_utilities.data import Data  # type: ignore[import-not-found]
+    finally:
+        sys.dont_write_bytecode = previous_bytecode_setting
 
     parsed = Data()
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -437,4 +442,3 @@ def audit_case(case: CaseData) -> dict[str, Any]:
         },
         "untranslated": list(case.untranslated),
     }
-

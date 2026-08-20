@@ -38,6 +38,7 @@ def configure_local_runtime(root: Path) -> Path:
     scratch.mkdir(parents=True, exist_ok=True)
     for name in ("TMP", "TEMP", "TMPDIR", "XDG_CACHE_HOME"):
         os.environ[name] = str(scratch)
+    sys.pycache_prefix = str(require_local_path(scratch / "pycache", "bytecode cache"))
     return scratch
 
 

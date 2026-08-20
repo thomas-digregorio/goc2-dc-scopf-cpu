@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/thomas-digregorio/goc2-dc-scopf-cpu/schemas/result.schema.json",
+  "title": "GOC2 derived DC-SCOPF result",
+  "type": "object",
+  "required": [
+    "result_version",
+    "profile",
+    "security_claim",
+    "qualification",
+    "source",
+    "reproducibility",
+    "solver",
+    "objectives",
+    "timings_seconds",
+    "model",
+    "orders",
+    "prior",
+    "base",
+    "contingencies",
+    "pricing",
+    "artifacts",
+    "checker"
+  ],
+  "properties": {
+    "result_version": {"const": 1},
+    "profile": {"const": "GOC2-DC-D1-CORRECTIVE-v1"},
+    "contingencies": {"type": "array", "minItems": 815, "maxItems": 815},
+    "checker": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {"status": {"enum": ["pending", "pass", "fail"]}},
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
+

@@ -103,7 +103,7 @@ def run_official_benchmark(root: Path, config_path: Path, config: dict) -> dict[
         timings["initial_serialization"] = monotonic_seconds() - step
 
         step = monotonic_seconds()
-        checker = verify_result(root, config, result_path)
+        checker = verify_result(root, config, result_path, config_path)
         timings["independent_verification"] = monotonic_seconds() - step
         timings["end_to_end"] = monotonic_seconds() - total_start
         peak = monitor.stop()
@@ -145,4 +145,3 @@ def run_official_benchmark(root: Path, config_path: Path, config: dict) -> dict[
         )
         write_json(lock_path, lock)
         raise
-

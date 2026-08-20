@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/thomas-digregorio/goc2-dc-scopf-cpu/schemas/config.schema.json",
+  "title": "GOC2 derived DC-SCOPF configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "config_version",
+    "profile",
+    "scenario",
+    "source_directory",
+    "source_manifest",
+    "result_directory",
+    "run_lock",
+    "solver",
+    "numerics",
+    "secondary_objective"
+  ],
+  "properties": {
+    "$schema": {"type": "string"},
+    "config_version": {"const": 1},
+    "profile": {"const": "GOC2-DC-D1-CORRECTIVE-v1"},
+    "scenario": {"const": "C2S6N00617/scenario_001"},
+    "source_directory": {"type": "string", "minLength": 1},
+    "source_manifest": {"type": "string", "minLength": 1},
+    "result_directory": {"type": "string", "minLength": 1},
+    "run_lock": {"type": "string", "minLength": 1},
+    "solver": {
+      "type": "object",
+      "required": ["name", "mip_relative_gap", "threads", "random_seed", "presolve", "console_logging"],
+      "properties": {
+        "name": {"const": "HiGHS"},
+        "mip_relative_gap": {"const": 0.001},
+        "mip_absolute_gap": {"type": "number", "minimum": 0},
+        "time_limit_seconds": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "threads": {"type": "integer", "minimum": 0},
+        "random_seed": {"type": "integer"},
+        "presolve": {"enum": ["on", "off", "choose"]},
+        "console_logging": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "numerics": {
+      "type": "object",
+      "required": ["model_residual_tolerance_pu", "security_violation_tolerance_pu", "integrality_tolerance", "primary_lexicographic_cap_usd"],
+      "properties": {
+        "model_residual_tolerance_pu": {"const": 1e-6},
+        "security_violation_tolerance_pu": {"const": 1e-5},
+        "integrality_tolerance": {"type": "number", "exclusiveMinimum": 0},
+        "primary_lexicographic_cap_usd": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "secondary_objective": {
+      "type": "object",
+      "required": ["contingency_start_weight", "normalized_generation_movement_weight", "normalized_load_movement_weight", "normalization_floor_mw"],
+      "additionalProperties": false,
+      "properties": {
+        "contingency_start_weight": {"type": "number", "minimum": 0},
+        "normalized_generation_movement_weight": {"type": "number", "minimum": 0},
+        "normalized_load_movement_weight": {"type": "number", "minimum": 0},
+        "normalization_floor_mw": {"type": "number", "exclusiveMinimum": 0}
+      }
+    }
+  }
+}
+

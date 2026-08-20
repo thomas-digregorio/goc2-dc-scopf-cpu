@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/config.schema.json",
   "config_version": 1,
   "profile": "GOC2-DC-D1-CORRECTIVE-v1",
   "scenario": "C2S6N00617/scenario_001",
@@ -29,4 +30,3 @@
     "normalization_floor_mw": 1.0
   }
 }
-

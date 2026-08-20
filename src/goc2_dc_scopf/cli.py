@@ -5,6 +5,8 @@ import json
 import time
 from pathlib import Path
 
+from jsonschema import Draft202012Validator
+
 from .benchmark import run_official_benchmark
 from .checker import verify_result
 from .highs import validate_model_translation
@@ -37,6 +39,8 @@ def main() -> None:
     configure_local_runtime(root)
     config_path = resolve_from(root, args.config, "configuration")
     config = load_json(config_path)
+    schema = load_json(resolve_from(root, "schemas/config.schema.json", "configuration schema"))
+    Draft202012Validator(schema).validate(config)
     if args.command == "ingest":
         print(json.dumps(audit_case(read_case(root, config)), indent=2))
         return
@@ -60,7 +64,7 @@ def main() -> None:
         return
     if args.command == "verify":
         result = require_local_path(Path(args.result), "result JSON")
-        print(json.dumps(verify_result(root, config, result), indent=2))
+        print(json.dumps(verify_result(root, config, result, config_path), indent=2))
         return
     raise AssertionError(args.command)
 

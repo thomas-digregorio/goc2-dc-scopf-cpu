@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from jsonschema import Draft202012Validator
 
-from .paths import require_local_path, sha256_file
+from .paths import load_json, require_local_path, sha256_file
 from .results import load_result, read_npz, save_result
 from .source import CaseData, CostSegment, read_case
 
@@ -225,7 +226,9 @@ def _objective(case: CaseData, arrays: dict[str, np.ndarray]) -> float:
     return float(value)
 
 
-def verify_result(root: Path, config: dict, result_path: Path) -> dict[str, Any]:
+def verify_result(
+    root: Path, config: dict, result_path: Path, config_path: Path | None = None
+) -> dict[str, Any]:
     root = require_local_path(root, "repository")
     result_path = require_local_path(result_path, "result JSON")
     payload = load_result(result_path)
@@ -234,6 +237,10 @@ def verify_result(root: Path, config: dict, result_path: Path) -> dict[str, Any]
         raise ValueError("Result source identity does not match the registered case")
     if payload["source"]["hashes"] != case.source_hashes:
         raise ValueError("Result source hashes do not match freshly read inputs")
+    if config_path is not None:
+        config_path = require_local_path(config_path, "configuration")
+        if sha256_file(config_path) != payload["reproducibility"]["config_sha256"]:
+            raise ValueError("Result configuration hash does not match the registered file")
 
     milp_arrays = _validate_artifact(root, payload["artifacts"]["milp_primal"])
     pricing_arrays = _validate_artifact(root, payload["artifacts"]["pricing_primal"])
@@ -247,10 +254,9 @@ def verify_result(root: Path, config: dict, result_path: Path) -> dict[str, Any]
     pricing_objective_error = abs(
         pricing_objective - float(payload["objectives"]["fixed_commitment_pricing_lp_usd"])
     )
-    model_violation.observe(objective_error / max(case.base_mva, 1.0), "objective", "MILP")
-    pricing_violation.observe(
-        pricing_objective_error / max(case.base_mva, 1.0), "objective", "pricing LP"
-    )
+    objective_tolerance = max(1e-5, 1e-10 * abs(objective))
+    objective_pass = objective_error <= objective_tolerance
+    pricing_objective_pass = pricing_objective_error <= objective_tolerance
 
     prices = payload["pricing"]["base_usd_per_mwh"]
     if len(prices) != len(case.buses) or not all(math.isfinite(float(x["price"])) for x in prices):
@@ -268,11 +274,16 @@ def verify_result(root: Path, config: dict, result_path: Path) -> dict[str, Any]
         and maximum_model <= residual_tolerance
         and maximum_security <= security_tolerance
         and pricing_optimal
+        and objective_pass
+        and pricing_objective_pass
     )
     summary = {
         "status": "pass" if passed else "fail",
         "mip_gap_pass": gap_pass,
         "pricing_lp_optimal": pricing_optimal,
+        "objective_pass": objective_pass,
+        "pricing_objective_pass": pricing_objective_pass,
+        "objective_tolerance_usd": objective_tolerance,
         "maximum_model_residual_pu": maximum_model,
         "maximum_model_residual_detail": {
             "milp": model_violation.__dict__,
@@ -291,6 +302,7 @@ def verify_result(root: Path, config: dict, result_path: Path) -> dict[str, Any]
         "source_contingencies_checked": len(case.contingencies),
     }
     payload["checker"] = summary
+    result_schema = load_json(require_local_path(root / "schemas" / "result.schema.json", "result schema"))
+    Draft202012Validator(result_schema).validate(payload)
     save_result(result_path, payload)
     return summary
-

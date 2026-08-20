@@ -256,8 +256,12 @@ def build_extensive_model(case: CaseData, config: dict) -> CanonicalModel:
             lower[state.startup(g)] = 0.0
             lower[state.shutdown(g)] = 0.0
             if state_index == 0:
-                upper[state.startup(g)] = float(generator.startup_qualified_base)
-                upper[state.shutdown(g)] = float(generator.shutdown_qualified_base)
+                upper[state.startup(g)] = float(
+                    generator.startup_qualified_base * (1 - generator.prior_on)
+                )
+                upper[state.shutdown(g)] = float(
+                    generator.shutdown_qualified_base * generator.prior_on
+                )
             elif contingency is not None and contingency.generator_index == g:
                 lower[state.pg(g)] = upper[state.pg(g)] = 0.0
                 lower[state.u(g)] = upper[state.u(g)] = 0.0
@@ -484,4 +488,3 @@ def build_extensive_model(case: CaseData, config: dict) -> CanonicalModel:
             "corrective_startups_plus_normalized_absolute_redispatch",
         ),
     )
-

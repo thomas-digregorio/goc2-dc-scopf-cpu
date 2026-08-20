@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
+import pytest
 
 from goc2_dc_scopf.checker import _check_physical, _objective
 from goc2_dc_scopf.highs import solve_lexicographic, solve_pricing_lp
@@ -47,5 +50,11 @@ def test_exact_pmin_is_active(tiny_case, tiny_config) -> None:
     assert found
 
 
-import pytest
-
+def test_base_indicators_are_directionally_bounded(tiny_case, tiny_config) -> None:
+    online = replace(tiny_case.generators[0], startup_qualified_base=1)
+    offline = replace(tiny_case.generators[1], shutdown_qualified_base=1)
+    case = replace(tiny_case, generators=(online, offline))
+    model = build_extensive_model(case, tiny_config)
+    base = model.layout.states[0]
+    assert model.column_upper[base.startup(0)] == 0.0
+    assert model.column_upper[base.shutdown(1)] == 0.0
