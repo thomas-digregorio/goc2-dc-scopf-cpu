@@ -5,21 +5,30 @@ security-constrained commitment and dispatch benchmark. It preserves source gene
 contingency semantics but is neither the official AC challenge model nor a complete reproduction
 of an ISO market or reliability assessment.
 
-The initial registered case is the lexicographically first scenario in the public 617-bus
-Challenge 2 Sandbox 6 archive: `C2S6N00617/scenario_001`. The source selection, URLs, identities,
-and hashes were frozen before any optimization result was observed. The 2,020-bus case is out of
-scope until the 617-bus acceptance gates pass and the user approves it.
+The first registered case is the lexicographically first scenario in the public 617-bus
+Challenge 2 Sandbox 6 archive: `C2S6N00617/scenario_001`. After that case passed its acceptance
+gates and the user approved the next scale, the lexicographically first standard C2S7 2,020-bus
+scenario, `C2S7N02020/scenario_001`, was frozen before any optimization. Source URLs, identities,
+and hashes are immutable for both cases.
+
+The public [Challenge 2 OEDI catalog](https://data.openei.org/submissions/6197) contains multiple
+event and sandbox families rather than one single size ladder. The C2S7 family contains 617, 793,
+2,020, 2,312, 4,102, 4,230, 5,752, 6,473, 8,032, 9,459, 9,460, 9,462, 12,209, 14,212, 24,465, and
+31,777-bus networks. This project advances from 617 directly to the previously registered
+2,020-bus target; it does not imply that the different-family 768-bus trial case or C2S7 793-bus
+case do not exist.
 
 ## Contract
 
-- one prior point, one preventive base state, and all 815 source corrective states;
+- one prior point, one preventive base state, and every source corrective state (815 for the
+  registered 617-bus case and 328 for the registered 2,020-bus case);
 - exact source PMIN/PMAX, commitment-change permissions, ramps, costs, demand bounds, and benefits;
 - source branch and generator contingencies only;
 - `RATEA` in the base state and `RATEC` in contingency states;
 - fixed source topology except for the explicitly outaged device;
 - no load shedding, generation spillage, overload slack, or automatic feasibility repair;
-- exact primary scenario generation: solve a reduced master, screen all 815 complete corrective
-  subproblems, add every infeasible contingency's canonical block, and repeat;
+- exact primary scenario generation: solve a reduced master, screen every complete corrective
+  subproblem, add every infeasible contingency's canonical block, and repeat;
 - immediate, durable primary-solution checkpointing;
 - a separate exhaustive checker that rereads the immutable source files before pricing;
 - a fixed-commitment pricing LP only after the independently checked primary passes;
@@ -32,9 +41,11 @@ prices are fixed-commitment, lossless-DC, security-constrained diagnostics—not
 settlement LMPs. Raw base balance-row duals are retained, and the checker verifies the documented
 HiGHS dual-to-$/MWh sign and unit conversion.
 
-See [docs/model-contract.md](docs/model-contract.md) and
-[docs/source-manifest.json](docs/source-manifest.json) for the frozen details. The non-solving
-[617-bus preflight](docs/preflight-617.md) records source translation and matrix-size gates.
+See [docs/model-contract.md](docs/model-contract.md), the frozen
+[617-bus source manifest](docs/source-manifest.json), and the frozen
+[2,020-bus source manifest](docs/source-manifest-2020.json) for the registered details. The
+non-solving [617-bus preflight](docs/preflight-617.md) and
+[2,020-bus preflight](docs/preflight-2020.md) record source translation and matrix-size gates.
 The completed 16-cell CPU acceleration study is reported in
 [docs/ablation-617-results.md](docs/ablation-617-results.md), with machine-readable summary
 metrics in [docs/ablation-617-results.csv](docs/ablation-617-results.csv).
@@ -53,6 +64,7 @@ Initialize dependencies and fetch the immutable archive with:
 ```powershell
 pwsh scripts/bootstrap.ps1
 pwsh scripts/fetch-617.ps1
+pwsh scripts/fetch-2020.ps1
 ```
 
 Development uses only tiny fixtures. After all preflight gates pass, each explicitly authorized
@@ -63,8 +75,10 @@ post-processing commit.
 
 The default configuration is
 `configs/GOC2-DC-D1-CORRECTIVE-v2-617-dt-default.json`. It is the certified D+T profile selected
-after the completed acceleration ablation. The CLI applies its one-thread BLAS/OpenMP policy before
-importing numerical libraries, so no shell environment setup is required. The prior extensive
+after the completed acceleration ablation. The registered 2,020-bus scale-up uses the same profile
+in `configs/GOC2-DC-D1-CORRECTIVE-v2-2020-dt.json`; changing the network does not change an ablation
+factor. The CLI applies its one-thread BLAS/OpenMP policy before importing numerical libraries, so
+no shell environment setup is required. The prior extensive
 simplex control remains frozen at
 `configs/GOC2-DC-D1-CORRECTIVE-v2-617-simplex-fresh-pricing.json`. Prior experiment configurations
 and their hashes remain frozen. Resident-model pricing hot starts are retained only in explicitly

@@ -1,0 +1,36 @@
+{
+  "manifest_version": 1,
+  "profile": "GOC2-DC-D1-CORRECTIVE-v2",
+  "selection_frozen_utc": "2026-08-21T02:36:50Z",
+  "selection_rule": "Use the previously registered 2,020-bus next scale; select the standard C2S7 family rather than the specialized C2S9 phase-shifter stress archive, then take the lexicographically first C2S7N02020 scenario before optimization.",
+  "archive": {
+    "url": "https://data.openei.org/files/6197/Challenge_2_Sandbox_Data_C2S7_Scenarios.zip",
+    "filename": "Challenge_2_Sandbox_Data_C2S7_Scenarios.zip",
+    "sha256": "db4abfae18a97bc97dd30670308668bbd15872ca8ecb0b3b68739c5e0563945e",
+    "content_length_bytes": 59269624,
+    "last_modified": "Fri, 20 Sep 2024 21:01:45 GMT",
+    "etag": "\"38861f8-6229358c4cb88\""
+  },
+  "scenario": {
+    "archive_directory": "C2S7N02020/scenario_001",
+    "files": {
+      "case.con": {
+        "bytes": 26049,
+        "sha256": "35fdbf4bb668f6319627872a4f641d6fb6c44e13a7286dfd732633bb6637b7a3"
+      },
+      "case.json": {
+        "bytes": 1033711,
+        "sha256": "1b68e62890fbd052dc4dd11a2538a83aff300ae0e7d6b8fe729857a41a0cfb42"
+      },
+      "case.raw": {
+        "bytes": 587661,
+        "sha256": "c5c5fd508ff9ae9486d6367f4a588d9e6195944ee574e18e506b1025bfa65dbf"
+      }
+    }
+  },
+  "parser": {
+    "repository": "https://github.com/GOCompetition/C2DataUtilities.git",
+    "commit": "9a61ac1c84cab527e2f3ab85cbd4a09dea3972db",
+    "license": "public domain"
+  }
+}

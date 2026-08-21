@@ -19,7 +19,7 @@
     "$schema": {"type": "string"},
     "config_version": {"const": 2},
     "profile": {"const": "GOC2-DC-D1-CORRECTIVE-v2"},
-    "scenario": {"const": "C2S6N00617/scenario_001"},
+    "scenario": {"type": "string", "minLength": 1},
     "source_directory": {"type": "string", "minLength": 1},
     "source_manifest": {"type": "string", "minLength": 1},
     "result_directory": {"type": "string", "minLength": 1},

@@ -188,6 +188,14 @@ def _verify_source_files(source_directory: Path, manifest: dict[str, Any]) -> di
     return observed
 
 
+def _verify_manifest_identity(config: dict[str, Any], manifest: dict[str, Any]) -> None:
+    if str(manifest.get("profile")) != str(config["profile"]):
+        raise ValueError("Source manifest profile does not match the registered configuration")
+    archive_directory = str(manifest.get("scenario", {}).get("archive_directory"))
+    if archive_directory != str(config["scenario"]):
+        raise ValueError("Source manifest scenario does not match the registered configuration")
+
+
 def _interpolate_impedance_correction(value: float, table: Any) -> float:
     points = [
         (float(position), float(factor))
@@ -216,6 +224,7 @@ def read_case(root: Path, config: dict[str, Any]) -> CaseData:
     source_directory = require_local_path(root / config["source_directory"], "source")
     manifest_path = require_local_path(root / config["source_manifest"], "source manifest")
     manifest = load_json(manifest_path)
+    _verify_manifest_identity(config, manifest)
     hashes = _verify_source_files(source_directory, manifest)
     _install_parser_path(root)
     previous_bytecode_setting = sys.dont_write_bytecode

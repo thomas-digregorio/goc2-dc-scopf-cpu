@@ -53,11 +53,11 @@
       "properties": {
         "description": {"type": "string", "minLength": 1},
         "dual_sign_convention": {"type": "string", "minLength": 1},
-        "base_usd_per_mwh": {"type": "array", "minItems": 617, "maxItems": 617}
+        "base_usd_per_mwh": {"type": "array", "minItems": 1}
       },
       "additionalProperties": true
     },
-    "contingencies": {"type": "array", "minItems": 815, "maxItems": 815},
+    "contingencies": {"type": "array", "minItems": 1},
     "checker": {
       "type": "object",
       "required": ["status"],
