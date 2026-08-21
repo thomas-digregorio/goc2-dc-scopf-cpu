@@ -43,3 +43,27 @@ def test_manifest_identity_rejects_cross_case_configuration() -> None:
     }
     with pytest.raises(ValueError, match="scenario"):
         _verify_manifest_identity(config, manifest)
+
+
+def test_2020_ipm_pricing_experiment_changes_only_pricing_path() -> None:
+    root = Path(__file__).parents[1]
+    baseline = _load(root / "configs" / "GOC2-DC-D1-CORRECTIVE-v2-2020-dt.json")
+    experiment = _load(
+        root / "configs" / "GOC2-DC-D1-CORRECTIVE-v2-2020-dt-ipm-pricing.json"
+    )
+    schema = _load(root / "schemas" / "config.schema.json")
+
+    Draft202012Validator(schema).validate(experiment)
+    validate_cell(experiment)
+
+    assert experiment["solver"]["pricing_lp_solver"] == "ipm"
+    assert experiment["solver"]["pricing_hot_start_required"] is False
+    assert experiment["solver"]["presolve"] == "on"
+    assert experiment["result_directory"] != baseline["result_directory"]
+    assert experiment["run_lock"] != baseline["run_lock"]
+
+    baseline_comparable = json.loads(json.dumps(baseline))
+    baseline_comparable["solver"]["pricing_lp_solver"] = "ipm"
+    baseline_comparable["result_directory"] = experiment["result_directory"]
+    baseline_comparable["run_lock"] = experiment["run_lock"]
+    assert experiment == baseline_comparable

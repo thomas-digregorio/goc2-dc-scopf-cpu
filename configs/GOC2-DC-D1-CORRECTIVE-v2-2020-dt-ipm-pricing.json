@@ -1,0 +1,52 @@
+{
+  "$schema": "../schemas/config.schema.json",
+  "config_version": 2,
+  "profile": "GOC2-DC-D1-CORRECTIVE-v2",
+  "scenario": "C2S7N02020/scenario_001",
+  "source_directory": "data/raw/extracted/C2S7N02020/scenario_001",
+  "source_manifest": "docs/source-manifest-2020.json",
+  "result_directory": "results/experimental-2020-dt-ipm-pricing",
+  "run_lock": "results/experimental-2020-dt-ipm-pricing/.official-run-started.json",
+  "run_budget": {
+    "end_to_end_limit_seconds": 1800,
+    "post_primary_reserve_seconds": 340,
+    "post_pricing_reserve_seconds": 15
+  },
+  "ablation": {
+    "cell": "1001",
+    "decomposition": true,
+    "internal_incumbent": false,
+    "strong_valid_cuts": false,
+    "solver_tuning": true,
+    "incumbent_budget_seconds": 120,
+    "max_decomposition_rounds": 32,
+    "valid_cut_bus_count": 32,
+    "linear_algebra_threads": 1
+  },
+  "solver": {
+    "name": "HiGHS",
+    "mip_relative_gap": 0.001,
+    "mip_absolute_gap": 0.0,
+    "mip_lp_solver": "simplex",
+    "pricing_lp_solver": "ipm",
+    "pricing_hot_start_required": false,
+    "time_limit_seconds": null,
+    "threads": 24,
+    "random_seed": 0,
+    "presolve": "on",
+    "primal_feasibility_tolerance": 1e-7,
+    "dual_feasibility_tolerance": 1e-7,
+    "mip_feasibility_tolerance": 1e-6,
+    "console_logging": true,
+    "advanced_options": {
+      "parallel": "on",
+      "simplex_strategy": 3,
+      "simplex_max_concurrency": 8
+    }
+  },
+  "numerics": {
+    "model_residual_tolerance_pu": 1e-6,
+    "security_violation_tolerance_pu": 1e-5,
+    "integrality_tolerance": 1e-6
+  }
+}

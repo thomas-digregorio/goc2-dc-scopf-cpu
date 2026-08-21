@@ -165,6 +165,36 @@ def test_tiny_primary_milp_and_pricing(tiny_case, tiny_config) -> None:
     Draft202012Validator(result_schema).validate(payload)
 
 
+def test_tiny_fresh_presolved_ipm_pricing(tiny_case, tiny_config) -> None:
+    capability = highspy.Highs()
+    assert capability.setOptionValue("solver", "ipm") == highspy.HighsStatus.kOk
+    option_status, crossover = capability.getOptionValue("run_crossover")
+    assert option_status == highspy.HighsStatus.kOk
+    assert crossover == "on"
+
+    config = deepcopy(tiny_config)
+    config["solver"]["pricing_lp_solver"] = "ipm"
+    model = build_extensive_model(tiny_case, config)
+    primary = solve_primary_milp(model, config)
+    pricing = solve_pricing_lp(model, config, primary)
+
+    arrays = physical_arrays(model, pricing.column_values)
+    violation, security = _check_physical(
+        tiny_case,
+        arrays,
+        fixed_commitment=physical_arrays(model, primary.column_values)["commitment"],
+    )
+    assert pricing.summary.model_status == "Optimal"
+    assert pricing.hot_start.pricing_solver == "ipm"
+    assert pricing.hot_start.selected_method == "fresh_lp_no_start"
+    assert not pricing.hot_start.primal_start_attempted
+    assert violation.maximum <= 1e-7
+    assert security.maximum <= 1e-7
+    assert base_prices_from_duals(
+        pricing.base_balance_duals, tiny_case.base_mva, tiny_case.delta_hours
+    ).tolist() == pytest.approx([10.0, 10.0, 10.0])
+
+
 def test_primary_model_has_no_corrective_movement_auxiliaries(tiny_case, tiny_config) -> None:
     model = build_extensive_model(tiny_case, tiny_config)
     state_columns = sum(state.stop - state.offset for state in model.layout.states)
