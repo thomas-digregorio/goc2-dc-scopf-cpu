@@ -5,16 +5,16 @@ import json
 import time
 from pathlib import Path
 
-from jsonschema import Draft202012Validator
+from .paths import (
+    configure_linear_algebra_runtime,
+    configure_local_runtime,
+    load_json,
+    repo_root,
+    require_local_path,
+    resolve_from,
+)
 
-from .benchmark import repair_inverted_price_sign, resume_saved_primary, run_official_benchmark
-from .checker import verify_primary_checkpoint, verify_result
-from .highs import validate_model_translation
-from .model import build_extensive_model, estimate_extensive_size
-from .paths import configure_local_runtime, load_json, repo_root, require_local_path, resolve_from
-from .source import audit_case, read_case
-
-DEFAULT_CONFIG = "configs/GOC2-DC-D1-CORRECTIVE-v2-617-simplex-fresh-pricing.json"
+DEFAULT_CONFIG = "configs/GOC2-DC-D1-CORRECTIVE-v2-617-dt-default.json"
 
 
 def _arguments() -> argparse.Namespace:
@@ -57,8 +57,26 @@ def main() -> None:
     configure_local_runtime(root)
     config_path = resolve_from(root, args.config, "configuration")
     config = load_json(config_path)
+    configure_linear_algebra_runtime(config)
+
+    from jsonschema import Draft202012Validator
+
     schema = load_json(resolve_from(root, "schemas/config.schema.json", "configuration schema"))
     Draft202012Validator(schema).validate(config)
+
+    # Import solver modules only after the selected configuration has applied its
+    # BLAS/OpenMP policy and passed schema validation. NumPy and HiGHS may initialize
+    # their runtimes at import time.
+    from .benchmark import (
+        repair_inverted_price_sign,
+        resume_saved_primary,
+        run_official_benchmark,
+    )
+    from .checker import verify_primary_checkpoint, verify_result
+    from .highs import validate_model_translation
+    from .model import build_extensive_model, estimate_extensive_size
+    from .source import audit_case, read_case
+
     if args.command == "ingest":
         print(json.dumps(audit_case(read_case(root, config)), indent=2))
         return

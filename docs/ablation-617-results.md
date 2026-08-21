@@ -18,6 +18,10 @@ The fastest cell that reproduced the control's commitment, dispatch, and base-bu
 vector was `1011` (`D+C+T`) at **335.312 seconds**, a **4.787x speedup** and **79.111%
 wall-time reduction**.
 
+After review, the requested `1e-3` certificate was accepted as the governing quality gate and
+`1001` (`D+T`) was promoted to the repository's operational default. The control and all frozen
+ablation configurations remain unchanged as historical evidence.
+
 This is a derived lossless-DC benchmark result. It is not an official GO Challenge score
 or a PJM/CAISO market or reliability result.
 

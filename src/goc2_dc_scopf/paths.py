@@ -42,6 +42,24 @@ def configure_local_runtime(root: Path) -> Path:
     return scratch
 
 
+def configure_linear_algebra_runtime(config: dict[str, Any]) -> dict[str, str]:
+    """Apply a configured thread limit before numerical libraries are imported."""
+    thread_count = config.get("ablation", {}).get("linear_algebra_threads")
+    if thread_count is None:
+        return {}
+    thread_count = int(thread_count)
+    if thread_count < 1:
+        raise ValueError("Linear-algebra thread count must be positive")
+    value = str(thread_count)
+    applied = {
+        "OPENBLAS_NUM_THREADS": value,
+        "OMP_NUM_THREADS": value,
+        "MKL_NUM_THREADS": value,
+    }
+    os.environ.update(applied)
+    return applied
+
+
 def sha256_file(path: Path, chunk_bytes: int = 1 << 20) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:

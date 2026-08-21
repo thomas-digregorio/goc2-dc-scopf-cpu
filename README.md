@@ -18,12 +18,14 @@ scope until the 617-bus acceptance gates pass and the user approves it.
 - `RATEA` in the base state and `RATEC` in contingency states;
 - fixed source topology except for the explicitly outaged device;
 - no load shedding, generation spillage, overload slack, or automatic feasibility repair;
-- one native HiGHS primary extensive MILP with no corrective-movement secondary objective;
+- exact primary scenario generation: solve a reduced master, screen all 815 complete corrective
+  subproblems, add every infeasible contingency's canonical block, and repeat;
 - immediate, durable primary-solution checkpointing;
 - a separate exhaustive checker that rereads the immutable source files before pricing;
 - a fixed-commitment pricing LP only after the independently checked primary passes;
-- by default, an explicit simplex primary with solver presolve on, followed by a fresh simplex
-  pricing LP with solver presolve on and no basis or primal start.
+- by default, HiGHS PAMI parallel dual simplex with 24 HiGHS threads and single-threaded numerical
+  runtimes, followed by a fresh simplex pricing LP with presolve and no basis or primal start;
+- a hard 1,800-second end-to-end budget that reserves time for pricing and verification.
 
 The source curves are synthetic GO Challenge curves, not submitted ISO offers. Reported nodal
 prices are fixed-commitment, lossless-DC, security-constrained diagnostics—not PJM or CAISO
@@ -60,9 +62,13 @@ from the hashed primary checkpoint; it refuses to rerun the MILP and records the
 post-processing commit.
 
 The default configuration is
-`configs/GOC2-DC-D1-CORRECTIVE-v2-617-simplex-fresh-pricing.json`. Prior experiment
-configurations and their hashes remain frozen. Resident-model pricing hot starts are retained only
-in explicitly named experimental configurations and are not the default path.
+`configs/GOC2-DC-D1-CORRECTIVE-v2-617-dt-default.json`. It is the certified D+T profile selected
+after the completed acceleration ablation. The CLI applies its one-thread BLAS/OpenMP policy before
+importing numerical libraries, so no shell environment setup is required. The prior extensive
+simplex control remains frozen at
+`configs/GOC2-DC-D1-CORRECTIVE-v2-617-simplex-fresh-pricing.json`. Prior experiment configurations
+and their hashes remain frozen. Resident-model pricing hot starts are retained only in explicitly
+named experimental configurations and are not the default path.
 
 ## Attribution
 
