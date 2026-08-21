@@ -33,6 +33,9 @@ HiGHS dual-to-$/MWh sign and unit conversion.
 See [docs/model-contract.md](docs/model-contract.md) and
 [docs/source-manifest.json](docs/source-manifest.json) for the frozen details. The non-solving
 [617-bus preflight](docs/preflight-617.md) records source translation and matrix-size gates.
+The completed 16-cell CPU acceleration study is reported in
+[docs/ablation-617-results.md](docs/ablation-617-results.md), with machine-readable summary
+metrics in [docs/ablation-617-results.csv](docs/ablation-617-results.csv).
 
 ## Local-only setup
 
