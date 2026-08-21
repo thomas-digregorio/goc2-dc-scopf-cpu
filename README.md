@@ -49,7 +49,9 @@ non-solving [617-bus preflight](docs/preflight-617.md) and
 The completed 16-cell CPU acceleration study is reported in
 [docs/ablation-617-results.md](docs/ablation-617-results.md), with machine-readable summary
 metrics in [docs/ablation-617-results.csv](docs/ablation-617-results.csv). The single authorized
-[2,020-bus D+T result](docs/dt-2020-result.md) is reported separately.
+[2,020-bus D+T result](docs/dt-2020-result.md) is reported separately. The controlled
+[2,020-bus presolved-IPM pricing experiment](docs/dt-2020-ipm-pricing-result.md) passed all gates
+but was slower than fresh presolved simplex because it required a full simplex cleanup.
 
 ## Local-only setup
 
