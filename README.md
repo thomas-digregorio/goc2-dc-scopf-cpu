@@ -48,7 +48,8 @@ non-solving [617-bus preflight](docs/preflight-617.md) and
 [2,020-bus preflight](docs/preflight-2020.md) record source translation and matrix-size gates.
 The completed 16-cell CPU acceleration study is reported in
 [docs/ablation-617-results.md](docs/ablation-617-results.md), with machine-readable summary
-metrics in [docs/ablation-617-results.csv](docs/ablation-617-results.csv).
+metrics in [docs/ablation-617-results.csv](docs/ablation-617-results.csv). The single authorized
+[2,020-bus D+T result](docs/dt-2020-result.md) is reported separately.
 
 ## Local-only setup
 
